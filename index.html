@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zentai Servicios Inmobiliarios</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome for Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel CDN for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase App (Core) SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <!-- Firebase Realtime Database SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            zentai: {
+              blue: '#1D3D4E',
+              gold: '#9E9275',
+              'gold-light': '#C4B99D',
+              dark: '#122631',
+              bg: '#F8F9FA'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-100 min-h-screen text-slate-800 antialiased">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- CONFIGURACIÓN DE FIREBASE ---
+    // Reemplaza estos datos con los de tu consola de Firebase si es necesario
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "zentaiinmobiliaria.firebaseapp.com",
+      databaseURL: "https://zentaiinmobiliaria-default-rtdb.firebaseio.com",
+      projectId: "zentaiinmobiliaria",
+      storageBucket: "zentaiinmobiliaria.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:abcdef123456"
+    };
+
+    // Inicializar Firebase de forma segura
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    // Propiedades iniciales por si la base de datos está vacía
+    const initialProperties = [
+      {
+        id: 'ZEN-2026-001',
+        controlNumber: 'ZEN-2026-001',
+        title: 'Casa Moderna en Residencia Los Olivos',
+        type: 'venta', // 'venta' o 'renta'
+        price: 2850000,
+        city: 'San Luis Río Colorado',
+        colonia: 'Burócratas',
+        landArea: 200,
+        builtArea: 160,
+        roomsCount: 3,
+        roomDetails: [
+          'Recámara principal con baño completo y vestidor',
+          '2 Recámaras secundarias con clóset',
+          'Sala / Comedor de concepto abierto',
+          'Cocina integral con barra de granito',
+          '2.5 Baños en total',
+          'Cochera para 2 autos'
+        ],
+        infonavit: true,
+        credits: ['Infonavit', 'Bancario', 'Cofinavit', 'Contado'],
+        // Campos específicos de Renta (vacíos si es venta)
+        rentTerms: {
+          depositMonths: '',
+          guarantorRequired: false,
+          incomeProof: false,
+          petsAllowed: false,
+          includedUtilities: '',
+          minContractMonths: '12'
+        },
+        ownerName: 'Carlos Mendoza Valencia',
+        ownerPhone: '653-123-4567',
+        ownerEmail: 'carlos.mendoza@email.com',
+        privateNotes: 'Comisión acordada del 5%. Escrituras al corriente en Notaría 3.',
+        adminComments: 'Revisado por administración. Papelería en regla.',
+        photos: [
+          'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=800&q=80',
+          'https://images.unsplash.com/photo-1600566753376-12c8ab7fb75b?auto=format&fit=crop&w=800&q=80'
+        ]
+      }
+    ];
+
+    function App() {
+      // Estado de Autenticación ('public' | 'vendor' | 'admin')
+      const [authMode, setAuthMode] = useState('public');
+      const [loginUser, setLoginUser] = useState('');
+      const [loginPass, setLoginPass] = useState('');
+      const [showLoginModal, setShowLoginModal] = useState(false);
+      const [targetRole, setTargetRole] = useState('');
+
+      // Base de datos de propiedades sincronizada con Firebase
+      const [properties, setProperties] = useState([]);
+      const [loadingDB, setLoadingDB] = useState(true);
+
+      // Cargar datos de Firebase en tiempo real
+      useEffect(() => {
+        const propRef = db.ref('properties');
+        propRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            // Convertir objeto de Firebase a Array
+            const loadedList = Object.keys(data).map(key => ({
+              firebaseKey: key,
+              ...data[key]
+            }));
+            setProperties(loadedList);
+          } else {
+            // Si está vacío, cargamos los datos iniciales por primera vez
+            initialProperties.forEach(p => {
+              db.ref('properties').push(p);
+            });
+          }
+          setLoadingDB(false);
+        }, (error) => {
+          console.error("Error al leer Firebase:", error);
+          setLoadingDB(false);
+        });
+
+        return () => propRef.off();
+      }, []);
+
+      const [selectedProperty, setSelectedProperty] = useState(null);
+      const [activePhotoIdx, setActivePhotoIdx] = useState(0);
+
+      // Filtros
+      const [activeTab, setActiveTab] = useState('venta'); // 'venta' o 'renta'
+      const [filterSearch, setFilterSearch] = useState('');
+      const [filterCity, setFilterCity] = useState('all');
+      const [filterColonia, setFilterColonia] = useState('all');
+      const [filterInfonavit, setFilterInfonavit] = useState('all');
+
+      // Modales de administración
+      const [showNewModal, setShowNewModal] = useState(false);
+      const [editingProperty, setEditingProperty] = useState(null);
+
+      // Formulario de Inmueble (Alta / Edición)
+      const [formData, setFormData] = useState({
+        controlNumber: '',
+        title: '',
+        type: 'venta',
+        price: '',
+        city: 'San Luis Río Colorado',
+        colonia: '',
+        landArea: '',
+        builtArea: '',
+        roomsCount: '',
+        roomDetails: '',
+        infonavit: true,
+        credits: ['Infonavit', 'Bancario'],
+        rentTerms: {
+          depositMonths: '1',
+          guarantorRequired: true,
+          incomeProof: true,
+          petsAllowed: false,
+          includedUtilities: 'Ninguno',
+          minContractMonths: '12'
+        },
+        ownerName: '',
+        ownerPhone: '',
+        ownerEmail: '',
+        privateNotes: '',
+        adminComments: '',
+        photos: []
+      });
+
+      const handleLoginSubmit = (e) => {
+        e.preventDefault();
+        if (targetRole === 'admin') {
+          if (loginUser === 'admin' && loginPass === 'admin123') {
+            setAuthMode('admin');
+            setShowLoginModal(false);
+            setLoginUser(''); setLoginPass('');
+          } else {
+            alert('Usuario o contraseña de Administrador incorrectos.');
+          }
+        } else if (targetRole === 'vendor') {
+          if (loginUser === 'vendedor' && loginPass === 'vendedor123') {
+            setAuthMode('vendor');
+            setShowLoginModal(false);
+            setLoginUser(''); setLoginPass('');
+          } else {
+            alert('Usuario o contraseña de Vendedor incorrectos.');
+          }
+        }
+      };
+
+      const handlePhotoUpload = (e) => {
+        const files = Array.from(e.target.files);
+        if (formData.photos.length + files.length > 10) {
+          alert('Máximo 10 fotos por vivienda.');
+          return;
+        }
+
+        files.forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 800;
+              const scale = MAX_WIDTH / img.width;
+              canvas.width = MAX_WIDTH;
+              canvas.height = img.height * scale;
+
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+
+              setFormData(prev => ({
+                ...prev,
+                photos: [...prev.photos, compressedBase64].slice(0, 10)
+              }));
+            };
+          };
+          reader.readAsDataURL(file);
+        });
+      };
+
+      const handleSaveProperty = (e) => {
+        e.preventDefault();
+        if (formData.photos.length === 0) {
+          alert('Por favor agrega al menos una foto.');
+          return;
+        }
+
+        const propData = {
+          ...formData,
+          controlNumber: formData.controlNumber || `ZEN-${Date.now()}`,
+          price: Number(formData.price),
+          landArea: Number(formData.landArea),
+          builtArea: Number(formData.builtArea),
+          roomsCount: Number(formData.roomsCount),
+          roomDetails: typeof formData.roomDetails === 'string' 
+            ? formData.roomDetails.split('\n').filter(l => l.trim() !== '') 
+            : formData.roomDetails
+        };
+
+        if (editingProperty) {
+          // Actualizar en Firebase usando firebaseKey
+          db.ref('properties/' + editingProperty.firebaseKey).set(propData)
+            .then(() => alert('Inmueble actualizado correctamente'))
+            .catch(err => alert('Error al actualizar: ' + err.message));
+        } else {
+          // Guardar nuevo en Firebase
+          db.ref('properties').push(propData)
+            .then(() => alert('Inmueble dado de alta en Firebase correctamente'))
+            .catch(err => alert('Error al guardar: ' + err.message));
+        }
+
+        closeModalForm();
+      };
+
+      const openEditModal = (prop) => {
+        setEditingProperty(prop);
+        setFormData({
+          ...prop,
+          roomDetails: Array.isArray(prop.roomDetails) ? prop.roomDetails.join('\n') : prop.roomDetails,
+          rentTerms: prop.rentTerms || { depositMonths: '1', guarantorRequired: true, incomeProof: true, petsAllowed: false, includedUtilities: '', minContractMonths: '12' }
+        });
+        setShowNewModal(true);
+      };
+
+      const closeModalForm = () => {
+        setShowNewModal(false);
+        setEditingProperty(null);
+        setFormData({
+          controlNumber: '',
+          title: '',
+          type: 'venta',
+          price: '',
+          city: 'San Luis Río Colorado',
+          colonia: '',
+          landArea: '',
+          builtArea: '',
+          roomsCount: '',
+          roomDetails: '',
+          infonavit: true,
+          credits: ['Infonavit', 'Bancario'],
+          rentTerms: { depositMonths: '1', guarantorRequired: true, incomeProof: true, petsAllowed: false, includedUtilities: 'Ninguno', minContractMonths: '12' },
+          ownerName: '',
+          ownerPhone: '',
+          ownerEmail: '',
+          privateNotes: '',
+          adminComments: '',
+          photos: []
+        });
+      };
+
+      const sendWhatsApp = (prop) => {
+        const isRenta = prop.type === 'renta';
+        let message = `*Zentai Servicios Inmobiliarios*\n\n` +
+          `*Ficha de ${isRenta ? 'Renta' : 'Venta'} - Control #${prop.controlNumber}*\n` +
+          `*Título:* ${prop.title}\n` +
+          `*Ubicación:* ${prop.colonia}, ${prop.city}\n` +
+          `*Precio:* $${prop.price.toLocaleString('es-MX')} MXN${isRenta ? ' / mes' : ''}\n` +
+          `*Terreno:* ${prop.landArea} m² | *Construcción:* ${prop.builtArea} m²\n` +
+          `*Habitaciones:* ${prop.roomsCount}\n`;
+
+        if (isRenta && prop.rentTerms) {
+          message += `*Depósito:* ${prop.rentTerms.depositMonths} mes(es)\n` +
+                     `*Aval Requerido:* ${prop.rentTerms.guarantorRequired ? 'Sí' : 'No'}\n` +
+                     `*Mascotas:* ${prop.rentTerms.petsAllowed ? 'Permitidas' : 'No permitidas'}\n`;
+        } else {
+          message += `*Infonavit:* ${prop.infonavit ? 'Sí' : 'No'}\n` +
+                     `*Créditos:* ${prop.credits?.join(', ') || 'N/A'}\n`;
+        }
+
+        message += `\n*Distribución:*\n` +
+          (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
+          `*Ver Foto Principal:* ${prop.photos[0] || ''}`;
+
+        const encoded = encodeURIComponent(message);
+        window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+      };
+
+      // Obtener listas únicas para filtros dinámicos
+      const citiesList = [...new Set(properties.map(p => p.city).filter(Boolean))];
+      const coloniasList = [...new Set(properties.map(p => p.colonia).filter(Boolean))];
+
+      const filtered = properties.filter(p => {
+        const matchTab = (p.type || 'venta') === activeTab;
+        const matchSearch = p.title.toLowerCase().includes(filterSearch.toLowerCase()) || 
+                            p.controlNumber.toLowerCase().includes(filterSearch.toLowerCase());
+        const matchCity = filterCity === 'all' || p.city === filterCity;
+        const matchColonia = filterColonia === 'all' || p.colonia === filterColonia;
+        const matchInfonavit = filterInfonavit === 'all' ? true : 
+                               filterInfonavit === 'yes' ? p.infonavit : !p.infonavit;
+        return matchTab && matchSearch && matchCity && matchColonia && (activeTab === 'renta' || matchInfonavit);
+      });
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          {/* Encabezado Principal */}
+          <header className="bg-zentai-blue text-white shadow-lg sticky top-0 z-40 border-b-2 border-zentai-gold">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
+              
+              {/* LOGOTIPO OFICIAL ZENTAI */}
+              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); }}>
+                <div className="w-12 h-12 bg-white rounded-full p-1 shadow-md flex items-center justify-center border-2 border-zentai-gold">
+                  <svg viewBox="0 0 500 500" className="w-full h-full object-contain">
+                    <circle cx="250" cy="250" r="230" fill="none" stroke="#9E9275" strokeWidth="12" />
+                    <g transform="translate(140, 110) scale(0.6)">
+                      <rect x="50" y="50" width="200" height="200" fill="none" stroke="#9E9275" strokeWidth="16"/>
+                      <rect x="80" y="80" width="200" height="200" fill="none" stroke="#9E9275" strokeWidth="16"/>
+                      <rect x="110" y="110" width="200" height="200" fill="none" stroke="#9E9275" strokeWidth="16"/>
+                      <polygon points="110,210 210,110 210,210" fill="#9E9275"/>
+                    </g>
+                    <text x="250" y="375" textAnchor="middle" fill="#1D3D4E" fontSize="42" fontWeight="900" fontFamily="sans-serif" letterSpacing="4">ZENTAI</text>
+                    <text x="250" y="415" textAnchor="middle" fill="#1D3D4E" fontSize="16" fontWeight="600" fontFamily="sans-serif" letterSpacing="3">SERVICIOS INMOBILIARIOS</text>
+                  </svg>
+                </div>
+                <div>
+                  <h1 className="text-lg font-extrabold tracking-wider text-white">ZENTAI INMOBILIARIA</h1>
+                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Catálogo Sincronizado Firebase</p>
+                </div>
+              </div>
+
+              {/* Botones de Autenticación / Roles */}
+              <div className="flex items-center space-x-2">
+                {authMode === 'public' ? (
+                  <div className="flex bg-zentai-dark rounded-lg p-1 border border-zentai-gold/40 text-xs">
+                    <button
+                      onClick={() => { setTargetRole('vendor'); setShowLoginModal(true); }}
+                      className="px-3 py-1.5 text-gray-200 hover:text-white font-semibold rounded transition"
+                    >
+                      <i className="fa-solid fa-user-tag mr-1 text-zentai-gold"></i> Login Vendedor
+                    </button>
+                    <button
+                      onClick={() => { setTargetRole('admin'); setShowLoginModal(true); }}
+                      className="px-3 py-1.5 bg-zentai-gold text-white font-semibold rounded shadow transition"
+                    >
+                      <i className="fa-solid fa-user-shield mr-1"></i> Login Admin
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-3 bg-zentai-dark px-3 py-1.5 rounded-lg border border-zentai-gold/50 text-xs">
+                    <span className="text-amber-400 font-bold uppercase flex items-center gap-1">
+                      <i className={`fa-solid ${authMode === 'admin' ? 'fa-user-shield' : 'fa-user-tag'}`}></i>
+                      Modo {authMode}
+                    </span>
+                    <button
+                      onClick={() => setAuthMode('public')}
+                      className="bg-red-600/80 hover:bg-red-700 text-white px-2.5 py-1 rounded font-semibold transition"
+                    >
+                      Cerrar Sesión
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* Subbar / Acciones Exclusivas de Administrador */}
+          {authMode === 'admin' && (
+            <div className="bg-amber-50 border-b border-amber-200 py-2.5 shadow-inner">
+              <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs">
+                <span className="text-amber-900 font-bold flex items-center gap-1.5">
+                  <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Panel de Administración Activo: Tienes permisos para dar de alta, editar y ver notas internas.
+                </span>
+                <button
+                  onClick={() => { setEditingProperty(null); setShowNewModal(true); }}
+                  className="bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold px-3 py-1.5 rounded shadow flex items-center gap-1.5 transition"
+                >
+                  <i className="fa-solid fa-plus"></i> Dar de Alta Inmueble
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Pestañas Principales: Venta vs Renta */}
+          <div className="bg-white border-b border-slate-200 shadow-sm">
+            <div className="max-w-7xl mx-auto px-4 flex justify-center space-x-8">
+              <button
+                onClick={() => setActiveTab('venta')}
+                className={`py-3 px-6 font-bold text-sm border-b-2 transition flex items-center gap-2 ${activeTab === 'venta' ? 'border-zentai-blue text-zentai-blue' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                <i className="fa-solid fa-house"></i> Casas y Bienes en Venta
+              </button>
+              <button
+                onClick={() => setActiveTab('renta')}
+                className={`py-3 px-6 font-bold text-sm border-b-2 transition flex items-center gap-2 ${activeTab === 'renta' ? 'border-zentai-gold text-zentai-gold' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+              >
+                <i className="fa-solid fa-key"></i> Casas y Departamentos en Renta
+              </button>
+            </div>
+          </div>
+
+          {/* Contenido Principal */}
+          <main className="max-w-7xl mx-auto px-4 py-6 flex-grow w-full">
+            
+            {/* Panel de Filtros Avanzados */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center">
+              <div className="relative">
+                <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
+                <input
+                  type="text"
+                  placeholder="Buscar título o # control..."
+                  value={filterSearch}
+                  onChange={(e) => setFilterSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-zentai-gold"
+                />
+              </div>
+
+              <div>
+                <select
+                  value={filterCity}
+                  onChange={(e) => setFilterCity(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg text-xs px-3 py-2 bg-white"
+                >
+                  <option value="all">Todas las Ciudades</option>
+                  {citiesList.map((c, i) => <option key={i} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <select
+                  value={filterColonia}
+                  onChange={(e) => setFilterColonia(e.target.value)}
+                  className="w-full border border-slate-300 rounded-lg text-xs px-3 py-2 bg-white"
+                >
+                  <option value="all">Todas las Colonias</option>
+                  {coloniasList.map((col, i) => <option key={i} value={col}>{col}</option>)}
+                </select>
+              </div>
+
+              {activeTab === 'venta' && (
+                <div>
+                  <select
+                    value={filterInfonavit}
+                    onChange={(e) => setFilterInfonavit(e.target.value)}
+                    className="w-full border border-slate-300 rounded-lg text-xs px-3 py-2 bg-white"
+                  >
+                    <option value="all">Infonavit (Todos)</option>
+                    <option value="yes">Acepta Infonavit</option>
+                    <option value="no">No aplica Infonavit</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {loadingDB ? (
+              <div className="text-center py-16 text-slate-500">
+                <i className="fa-solid fa-spinner fa-spin text-3xl text-zentai-gold mb-2"></i>
+                <p>Cargando datos desde Firebase...</p>
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
+                <i className="fa-solid fa-house-circle-xmark text-4xl text-slate-300 mb-2"></i>
+                <p className="text-slate-600 font-semibold text-sm">No se encontraron inmuebles registrados para esta categoría o filtros.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filtered.map(prop => (
+                  <div key={prop.firebaseKey || prop.id} className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col hover:shadow-lg transition">
+                    
+                    {/* Portada */}
+                    <div className="relative h-48 bg-slate-100 overflow-hidden group">
+                      <img
+                        src={prop.photos?.[0] || 'https://via.placeholder.com/600x400?text=Sin+Foto'}
+                        alt={prop.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                      />
+                      <div className="absolute top-2 left-2 bg-zentai-blue text-white text-xs font-bold px-2 py-1 rounded shadow">
+                        #{prop.controlNumber}
+                      </div>
+
+                      <div className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shadow ${prop.type === 'renta' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white'}`}>
+                        {prop.type === 'renta' ? 'En Renta' : 'En Venta'}
+                      </div>
+
+                      <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
+                        <i className="fa-solid fa-camera mr-1"></i> {prop.photos?.length || 0}/10
+                      </div>
+                    </div>
+
+                    {/* Información */}
+                    <div className="p-4 flex-grow flex flex-col justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold text-zentai-gold uppercase tracking-wider mb-1">
+                          <i className="fa-solid fa-location-dot mr-1"></i> {prop.colonia}, {prop.city}
+                        </div>
+                        <h3 className="font-bold text-slate-800 text-base line-clamp-1">{prop.title}</h3>
+                        <p className="text-xl font-extrabold text-zentai-blue mt-1">
+                          ${prop.price?.toLocaleString('es-MX')} <span className="text-xs font-normal text-slate-500">MXN {prop.type === 'renta' ? '/ mes' : ''}</span>
+                        </p>
+
+                        {/* Especificaciones */}
+                        <div className="grid grid-cols-3 gap-2 my-3 py-2 border-y border-slate-100 text-center text-xs">
+                          <div>
+                            <p className="text-slate-400">Terreno</p>
+                            <p className="font-semibold text-slate-700">{prop.landArea} m²</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-400">Construcción</p>
+                            <p className="font-semibold text-slate-700">{prop.builtArea} m²</p>
+                          </div>
+                          <div>
+                            <p className="text-slate-400">Cuartos</p>
+                            <p className="font-semibold text-slate-700">{prop.roomsCount}</p>
+                          </div>
+                        </div>
+
+                        {/* Datos de Renta si aplica */}
+                        {prop.type === 'renta' && prop.rentTerms && (
+                          <div className="bg-amber-50/70 p-2.5 rounded-lg border border-amber-200 text-[11px] mb-3 space-y-1">
+                            <p className="font-bold text-amber-900"><i className="fa-solid fa-key text-amber-600 mr-1"></i> Requisitos de Renta:</p>
+                            <p>• Depósito: <span className="font-semibold">{prop.rentTerms.depositMonths} mes(es)</span></p>
+                            <p>• Aval/Fiador: <span className="font-semibold">{prop.rentTerms.guarantorRequired ? 'Requerido' : 'No necesario'}</span></p>
+                            <p>• Mascotas: <span className="font-semibold">{prop.rentTerms.petsAllowed ? 'Permitidas' : 'No permitidas'}</span></p>
+                          </div>
+                        )}
+
+                        {/* DATOS PRIVADOS PROPIETARIO (SÓLO ADMIN) */}
+                        {authMode === 'admin' && (
+                          <div className="mt-3 bg-slate-100 p-3 rounded-lg border border-slate-300 text-xs space-y-1">
+                            <p className="font-bold text-slate-900 flex items-center justify-between">
+                              <span><i className="fa-solid fa-lock text-amber-600 mr-1"></i> Propietario (Privado):</span>
+                              <button onClick={() => openEditModal(prop)} className="text-[10px] bg-zentai-blue text-white px-2 py-0.5 rounded hover:bg-zentai-dark">
+                                <i className="fa-solid fa-pen mr-1"></i> Editar
+                              </button>
+                            </p>
+                            <p><span className="font-semibold">Nombre:</span> {prop.ownerName || 'N/A'}</p>
+                            <p><span className="font-semibold">Tel:</span> {prop.ownerPhone || 'N/A'}</p>
+                            
+                            {/* COMENTARIO / OBSERVACIÓN DE CASA (SÓLO ADMIN) */}
+                            {prop.adminComments && (
+                              <div className="mt-2 pt-2 border-t border-slate-300 text-amber-900 bg-amber-100/60 p-2 rounded">
+                                <p className="font-bold text-[10px] uppercase"><i className="fa-solid fa-comment-dots mr-1"></i> Nota Interna Admin:</p>
+                                <p className="italic text-[11px]">{prop.adminComments}</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botones */}
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          onClick={() => { setSelectedProperty(prop); setActivePhotoIdx(0); }}
+                          className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded-lg transition"
+                        >
+                          Ver Detalles
+                        </button>
+
+                        <button
+                          onClick={() => sendWhatsApp(prop)}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow transition flex items-center gap-1.5"
+                        >
+                          <i className="fa-brands fa-whatsapp text-sm"></i> WhatsApp
+                        </button>
+                      </div>
+
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+
+          {/* Modal de Detalle */}
+          {selectedProperty && (
+            <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
+              <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl my-8">
+                <div className="bg-zentai-blue text-white p-4 flex justify-between items-center">
+                  <div>
+                    <span className="text-xs text-zentai-gold font-bold">CONTROL #{selectedProperty.controlNumber}</span>
+                    <h2 className="text-lg font-bold">{selectedProperty.title}</h2>
+                  </div>
+                  <button onClick={() => setSelectedProperty(null)} className="text-slate-300 hover:text-white text-xl">
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Visor de Fotos */}
+                  <div>
+                    <div className="h-64 bg-slate-900 rounded-lg overflow-hidden relative mb-3">
+                      <img
+                        src={selectedProperty.photos?.[activePhotoIdx] || 'https://via.placeholder.com/600x400?text=Sin+Foto'}
+                        alt="Foto amplia"
+                        className="w-full h-full object-contain"
+                      />
+                      <div className="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded">
+                        {activePhotoIdx + 1} de {selectedProperty.photos?.length || 0}
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 overflow-x-auto pb-2">
+                      {selectedProperty.photos?.map((ph, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setActivePhotoIdx(idx)}
+                          className={`w-16 h-12 flex-shrink-0 rounded overflow-hidden border-2 transition ${activePhotoIdx === idx ? 'border-zentai-gold scale-105' : 'border-transparent opacity-60'}`}
+                        >
+                          <img src={ph} className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Info Detallada */}
+                  <div className="flex flex-col justify-between text-xs">
+                    <div>
+                      <p className="text-2xl font-extrabold text-zentai-blue mb-1">
+                        ${selectedProperty.price?.toLocaleString('es-MX')} MXN {selectedProperty.type === 'renta' ? '/ mes' : ''}
+                      </p>
+                      <p className="text-slate-500 font-semibold mb-3">
+                        <i className="fa-solid fa-location-dot text-zentai-gold mr-1"></i> {selectedProperty.colonia}, {selectedProperty.city}
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-lg text-center mb-4">
+                        <div>
+                          <p className="text-slate-400">Terreno</p>
+                          <p className="font-bold">{selectedProperty.landArea} m²</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400">Construcción</p>
+                          <p className="font-bold">{selectedProperty.builtArea} m²</p>
+                        </div>
+                        <div>
+                          <p className="text-slate-400">Cuartos</p>
+                          <p className="font-bold">{selectedProperty.roomsCount}</p>
+                        </div>
+                      </div>
+
+                      <div className="mb-4">
+                        <h4 className="font-bold uppercase text-slate-400 tracking-wider mb-2">Distribución de Cuartos / Áreas:</h4>
+                        <ul className="space-y-1.5 max-h-32 overflow-y-auto pr-2">
+                          {(selectedProperty.roomDetails || []).map((detail, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <i className="fa-solid fa-check text-zentai-gold mt-0.5"></i>
+                              <span>{detail}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Si es Renta, mostrar requisitos */}
+                      {selectedProperty.type === 'renta' && selectedProperty.rentTerms && (
+                        <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4 space-y-1">
+                          <p className="font-bold text-amber-900"><i className="fa-solid fa-key mr-1"></i> Información y Requisitos de Arrendamiento:</p>
+                          <p>• Meses de depósito: {selectedProperty.rentTerms.depositMonths}</p>
+                          <p>• Aval con propiedad: {selectedProperty.rentTerms.guarantorRequired ? 'Sí' : 'No'}</p>
+                          <p>• Comprobante de ingresos: {selectedProperty.rentTerms.incomeProof ? 'Requerido' : 'No'}</p>
+                          <p>• Se aceptan mascotas: {selectedProperty.rentTerms.petsAllowed ? 'Sí' : 'No'}</p>
+                          <p>• Contrato mínimo: {selectedProperty.rentTerms.minContractMonths} meses</p>
+                        </div>
+                      )}
+
+                      {/* Si es Venta, mostrar Infonavit */}
+                      {selectedProperty.type === 'venta' && (
+                        <div className="mb-4">
+                          <p className="mb-1">
+                            <span className="font-semibold">Infonavit:</span> {selectedProperty.infonavit ? '✅ Aplica para crédito Infonavit' : '❌ No aplica para Infonavit'}
+                          </p>
+                          <p className="text-slate-600">
+                            <span className="font-semibold">Créditos admisibles:</span> {selectedProperty.credits?.join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Comentarios Privados Admin en Detalle */}
+                      {authMode === 'admin' && selectedProperty.adminComments && (
+                        <div className="bg-amber-100/80 p-3 rounded-lg border border-amber-300 text-amber-900">
+                          <p className="font-bold mb-1"><i className="fa-solid fa-comment-dots mr-1"></i> Comentarios Internos del Administrador:</p>
+                          <p className="italic">{selectedProperty.adminComments}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100">
+                      <button
+                        onClick={() => sendWhatsApp(selectedProperty)}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg shadow transition flex items-center justify-center gap-2"
+                      >
+                        <i className="fa-brands fa-whatsapp text-base"></i> Enviar Ficha por WhatsApp
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de Login */}
+          {showLoginModal && (
+            <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-base text-zentai-blue">
+                    Acceso como {targetRole === 'admin' ? 'Administrador' : 'Vendedor'}
+                  </h3>
+                  <button onClick={() => setShowLoginModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+                <form onSubmit={handleLoginSubmit} className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700">Usuario</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder={targetRole === 'admin' ? 'admin' : 'vendedor'}
+                      value={loginUser}
+                      onChange={e => setLoginUser(e.target.value)}
+                      className="w-full mt-1 p-2 border rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700">Contraseña</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="********"
+                      value={loginPass}
+                      onChange={e => setLoginPass(e.target.value)}
+                      className="w-full mt-1 p-2 border rounded"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold rounded shadow mt-2"
+                  >
+                    Ingresar al Sistema
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de Alta y Edición de Inmuebles (Administrador) */}
+          {showNewModal && (
+            <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
+                <div className="bg-zentai-blue text-white p-4 flex justify-between items-center">
+                  <h2 className="font-bold text-base flex items-center gap-2">
+                    <i className="fa-solid fa-house-medical text-zentai-gold"></i> {editingProperty ? 'Editar Inmueble' : 'Alta de Nuevo Inmueble'} (Firebase)
+                  </h2>
+                  <button onClick={closeModalForm} className="text-slate-300 hover:text-white">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveProperty} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700">Operación *</label>
+                      <select
+                        value={formData.type}
+                        onChange={e => setFormData({...formData, type: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded bg-white"
+                      >
+                        <option value="venta">Venta</option>
+                        <option value="renta">Renta</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700"># Control *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. ZEN-2026-003"
+                        value={formData.controlNumber}
+                        onChange={e => setFormData({...formData, controlNumber: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">Precio ($ MXN) *</label>
+                      <input
+                        type="number"
+                        required
+                        placeholder="2500000"
+                        value={formData.price}
+                        onChange={e => setFormData({...formData, price: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700">Título / Nombre Descriptivo *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej. Casa Residencial con Alberca"
+                      value={formData.title}
+                      onChange={e => setFormData({...formData, title: e.target.value})}
+                      className="w-full mt-1 p-2 border rounded"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700">Ciudad *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. San Luis Río Colorado"
+                        value={formData.city}
+                        onChange={e => setFormData({...formData, city: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">Colonia *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. Burócratas / Comercial"
+                        value={formData.colonia}
+                        onChange={e => setFormData({...formData, colonia: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700">M² Terreno *</label>
+                      <input
+                        type="number"
+                        required
+                        placeholder="200"
+                        value={formData.landArea}
+                        onChange={e => setFormData({...formData, landArea: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">M² Construidos *</label>
+                      <input
+                        type="number"
+                        required
+                        placeholder="150"
+                        value={formData.builtArea}
+                        onChange={e => setFormData({...formData, builtArea: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">Cant. Cuartos *</label>
+                      <input
+                        type="number"
+                        required
+                        placeholder="4"
+                        value={formData.roomsCount}
+                        onChange={e => setFormData({...formData, roomsCount: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700">Especificación de Cada Cuarto (Un detalle por línea) *</label>
+                    <textarea
+                      rows="3"
+                      required
+                      placeholder="Recámara Principal con baño&#10;2 Recámaras secundarias&#10;Sala y Comedor"
+                      value={formData.roomDetails}
+                      onChange={e => setFormData({...formData, roomDetails: e.target.value})}
+                      className="w-full mt-1 p-2 border rounded"
+                    ></textarea>
+                  </div>
+
+                  {/* Campos específicos si es RENTA */}
+                  {formData.type === 'renta' && (
+                    <div className="bg-amber-50 p-3 rounded-lg border border-amber-300 space-y-2">
+                      <p className="font-bold text-amber-900"><i className="fa-solid fa-key mr-1"></i> Requisitos de Arrendamiento (Renta):</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div>
+                          <label className="text-[11px] font-bold">Meses Depósito</label>
+                          <input type="text" value={formData.rentTerms.depositMonths} onChange={e => setFormData({...formData, rentTerms: {...formData.rentTerms, depositMonths: e.target.value}})} className="w-full p-1.5 border rounded" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold">Contrato Mínimo</label>
+                          <input type="text" value={formData.rentTerms.minContractMonths} onChange={e => setFormData({...formData, rentTerms: {...formData.rentTerms, minContractMonths: e.target.value}})} className="w-full p-1.5 border rounded" />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-bold">Servicios Incluidos</label>
+                          <input type="text" value={formData.rentTerms.includedUtilities} onChange={e => setFormData({...formData, rentTerms: {...formData.rentTerms, includedUtilities: e.target.value}})} className="w-full p-1.5 border rounded" />
+                        </div>
+                        <div className="flex flex-col justify-around pt-2">
+                          <label className="flex items-center space-x-1 font-semibold cursor-pointer">
+                            <input type="checkbox" checked={formData.rentTerms.guarantorRequired} onChange={e => setFormData({...formData, rentTerms: {...formData.rentTerms, guarantorRequired: e.target.checked}})} />
+                            <span>Aval requerido</span>
+                          </label>
+                          <label className="flex items-center space-x-1 font-semibold cursor-pointer">
+                            <input type="checkbox" checked={formData.rentTerms.petsAllowed} onChange={e => setFormData({...formData, rentTerms: {...formData.rentTerms, petsAllowed: e.target.checked}})} />
+                            <span>Mascotas OK</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Campos si es VENTA */}
+                  {formData.type === 'venta' && (
+                    <div className="bg-slate-50 p-3 rounded border">
+                      <label className="flex items-center space-x-2 font-bold text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData.infonavit}
+                          onChange={e => setFormData({...formData, infonavit: e.target.checked})}
+                          className="rounded text-zentai-gold focus:ring-zentai-gold"
+                        />
+                        <span>¿Pasa para crédito Infonavit?</span>
+                      </label>
+                    </div>
+                  )}
+
+                  {/* COMENTARIO INTERNO DEL ADMINISTRADOR */}
+                  <div className="bg-amber-100/60 p-3 rounded-lg border border-amber-300">
+                    <label className="font-bold text-amber-900 block mb-1">
+                      <i className="fa-solid fa-comment-dots mr-1"></i> Comentario / Bitácora Interna (Sólo visible para Administrador)
+                    </label>
+                    <textarea
+                      rows="2"
+                      placeholder="Observaciones de escrituras, comisiones, notas del dueño..."
+                      value={formData.adminComments}
+                      onChange={e => setFormData({...formData, adminComments: e.target.value})}
+                      className="w-full p-2 border rounded bg-white"
+                    ></textarea>
+                  </div>
+
+                  {/* DATOS DEL PROPIETARIO */}
+                  <div className="border border-slate-300 bg-slate-50 p-3 rounded-lg space-y-2">
+                    <p className="font-bold text-slate-800 flex items-center">
+                      <i className="fa-solid fa-user-lock mr-1.5 text-amber-600"></i> Datos del Propietario (Privado)
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nombre Completo"
+                        value={formData.ownerName}
+                        onChange={e => setFormData({...formData, ownerName: e.target.value})}
+                        className="p-2 border rounded bg-white"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Teléfono"
+                        value={formData.ownerPhone}
+                        onChange={e => setFormData({...formData, ownerPhone: e.target.value})}
+                        className="p-2 border rounded bg-white"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Correo"
+                        value={formData.ownerEmail}
+                        onChange={e => setFormData({...formData, ownerEmail: e.target.value})}
+                        className="p-2 border rounded bg-white"
+                      />
+                    </div>
+                  </div>
+
+                  {/* CARGA DE FOTOS */}
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">
+                      Fotos del Inmueble (Hasta 10 fotos) *
+                    </label>
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={handlePhotoUpload}
+                      disabled={formData.photos.length >= 10}
+                      className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-zentai-blue file:text-white hover:file:bg-zentai-dark"
+                    />
+                    <div className="grid grid-cols-5 gap-2 mt-3">
+                      {formData.photos.map((ph, idx) => (
+                        <div key={idx} className="relative h-16 rounded overflow-hidden border">
+                          <img src={ph} className="w-full h-full object-cover" />
+                          <button
+                            type="button"
+                            onClick={() => setFormData({...formData, photos: formData.photos.filter((_, i) => i !== idx)})}
+                            className="absolute top-0 right-0 bg-red-600 text-white w-4 h-4 text-[10px] flex items-center justify-center"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={closeModalForm}
+                      className="px-4 py-2 border rounded text-slate-600 font-semibold"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold rounded shadow"
+                    >
+                      {editingProperty ? 'Guardar Cambios' : 'Registrar en Firebase'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Pie de Página */}
+          <footer className="bg-zentai-dark text-slate-400 text-xs py-6 mt-12 border-t border-zentai-gold/20">
+            <div className="max-w-7xl mx-auto px-4 text-center space-y-2">
+              <p className="font-semibold text-slate-300">ZENTAI SERVICIOS INMOBILIARIOS</p>
+              <p className="text-[11px] text-slate-500">
+                Sistema Inmobiliario en Tiempo Real con Firebase Realtime Database
+              </p>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
