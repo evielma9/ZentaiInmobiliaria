@@ -44,7 +44,6 @@
     const { useState, useEffect } = React;
 
     // --- CONFIGURACIÓN DE FIREBASE ---
-    // Reemplaza estos datos con los de tu consola de Firebase si es necesario
     const firebaseConfig = {
       apiKey: "TU_API_KEY",
       authDomain: "zentaiinmobiliaria.firebaseapp.com",
@@ -67,7 +66,7 @@
         id: 'ZEN-2026-001',
         controlNumber: 'ZEN-2026-001',
         title: 'Casa Moderna en Residencia Los Olivos',
-        type: 'venta', // 'venta' o 'renta'
+        type: 'venta',
         price: 2850000,
         city: 'San Luis Río Colorado',
         colonia: 'Burócratas',
@@ -84,7 +83,6 @@
         ],
         infonavit: true,
         credits: ['Infonavit', 'Bancario', 'Cofinavit', 'Contado'],
-        // Campos específicos de Renta (vacíos si es venta)
         rentTerms: {
           depositMonths: '',
           guarantorRequired: false,
@@ -106,31 +104,26 @@
     ];
 
     function App() {
-      // Estado de Autenticación ('public' | 'vendor' | 'admin')
       const [authMode, setAuthMode] = useState('public');
       const [loginUser, setLoginUser] = useState('');
       const [loginPass, setLoginPass] = useState('');
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [targetRole, setTargetRole] = useState('');
 
-      // Base de datos de propiedades sincronizada con Firebase
       const [properties, setProperties] = useState([]);
       const [loadingDB, setLoadingDB] = useState(true);
 
-      // Cargar datos de Firebase en tiempo real
       useEffect(() => {
         const propRef = db.ref('properties');
         propRef.on('value', (snapshot) => {
           const data = snapshot.val();
           if (data) {
-            // Convertir objeto de Firebase a Array
             const loadedList = Object.keys(data).map(key => ({
               firebaseKey: key,
               ...data[key]
             }));
             setProperties(loadedList);
           } else {
-            // Si está vacío, cargamos los datos iniciales por primera vez
             initialProperties.forEach(p => {
               db.ref('properties').push(p);
             });
@@ -147,18 +140,15 @@
       const [selectedProperty, setSelectedProperty] = useState(null);
       const [activePhotoIdx, setActivePhotoIdx] = useState(0);
 
-      // Filtros
-      const [activeTab, setActiveTab] = useState('venta'); // 'venta' o 'renta'
+      const [activeTab, setActiveTab] = useState('venta');
       const [filterSearch, setFilterSearch] = useState('');
       const [filterCity, setFilterCity] = useState('all');
       const [filterColonia, setFilterColonia] = useState('all');
       const [filterInfonavit, setFilterInfonavit] = useState('all');
 
-      // Modales de administración
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
 
-      // Formulario de Inmueble (Alta / Edición)
       const [formData, setFormData] = useState({
         controlNumber: '',
         title: '',
@@ -262,12 +252,10 @@
         };
 
         if (editingProperty) {
-          // Actualizar en Firebase usando firebaseKey
           db.ref('properties/' + editingProperty.firebaseKey).set(propData)
             .then(() => alert('Inmueble actualizado correctamente'))
             .catch(err => alert('Error al actualizar: ' + err.message));
         } else {
-          // Guardar nuevo en Firebase
           db.ref('properties').push(propData)
             .then(() => alert('Inmueble dado de alta en Firebase correctamente'))
             .catch(err => alert('Error al guardar: ' + err.message));
@@ -312,13 +300,14 @@
         });
       };
 
+      // --- FUNCIÓN DE WHATSAPP CORREGIDA ---
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
         let message = `*Zentai Servicios Inmobiliarios*\n\n` +
           `*Ficha de ${isRenta ? 'Renta' : 'Venta'} - Control #${prop.controlNumber}*\n` +
           `*Título:* ${prop.title}\n` +
           `*Ubicación:* ${prop.colonia}, ${prop.city}\n` +
-          `*Precio:* $${prop.price.toLocaleString('es-MX')} MXN${isRenta ? ' / mes' : ''}\n` +
+          `*Precio:* $${prop.price?.toLocaleString('es-MX')} MXN${isRenta ? ' / mes' : ''}\n` +
           `*Terreno:* ${prop.landArea} m² | *Construcción:* ${prop.builtArea} m²\n` +
           `*Habitaciones:* ${prop.roomsCount}\n`;
 
@@ -333,13 +322,12 @@
 
         message += `\n*Distribución:*\n` +
           (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
-          `*Ver Foto Principal:* ${prop.photos[0] || ''}`;
+          `*Consulta más detalles y fotos en nuestro catálogo digital.*`;
 
         const encoded = encodeURIComponent(message);
         window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
       };
 
-      // Obtener listas únicas para filtros dinámicos
       const citiesList = [...new Set(properties.map(p => p.city).filter(Boolean))];
       const coloniasList = [...new Set(properties.map(p => p.colonia).filter(Boolean))];
 
@@ -356,11 +344,9 @@
 
       return (
         <div className="min-h-screen flex flex-col">
-          {/* Encabezado Principal */}
           <header className="bg-zentai-blue text-white shadow-lg sticky top-0 z-40 border-b-2 border-zentai-gold">
             <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
               
-              {/* LOGOTIPO OFICIAL ZENTAI */}
               <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); }}>
                 <div className="w-12 h-12 bg-white rounded-full p-1 shadow-md flex items-center justify-center border-2 border-zentai-gold">
                   <svg viewBox="0 0 500 500" className="w-full h-full object-contain">
@@ -381,7 +367,6 @@
                 </div>
               </div>
 
-              {/* Botones de Autenticación / Roles */}
               <div className="flex items-center space-x-2">
                 {authMode === 'public' ? (
                   <div className="flex bg-zentai-dark rounded-lg p-1 border border-zentai-gold/40 text-xs">
@@ -416,7 +401,6 @@
             </div>
           </header>
 
-          {/* Subbar / Acciones Exclusivas de Administrador */}
           {authMode === 'admin' && (
             <div className="bg-amber-50 border-b border-amber-200 py-2.5 shadow-inner">
               <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs">
@@ -433,7 +417,6 @@
             </div>
           )}
 
-          {/* Pestañas Principales: Venta vs Renta */}
           <div className="bg-white border-b border-slate-200 shadow-sm">
             <div className="max-w-7xl mx-auto px-4 flex justify-center space-x-8">
               <button
@@ -451,10 +434,7 @@
             </div>
           </div>
 
-          {/* Contenido Principal */}
           <main className="max-w-7xl mx-auto px-4 py-6 flex-grow w-full">
-            
-            {/* Panel de Filtros Avanzados */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-center">
               <div className="relative">
                 <i className="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-xs"></i>
@@ -519,7 +499,6 @@
                 {filtered.map(prop => (
                   <div key={prop.firebaseKey || prop.id} className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col hover:shadow-lg transition">
                     
-                    {/* Portada */}
                     <div className="relative h-48 bg-slate-100 overflow-hidden group">
                       <img
                         src={prop.photos?.[0] || 'https://via.placeholder.com/600x400?text=Sin+Foto'}
@@ -539,7 +518,6 @@
                       </div>
                     </div>
 
-                    {/* Información */}
                     <div className="p-4 flex-grow flex flex-col justify-between">
                       <div>
                         <div className="text-[11px] font-semibold text-zentai-gold uppercase tracking-wider mb-1">
@@ -550,7 +528,6 @@
                           ${prop.price?.toLocaleString('es-MX')} <span className="text-xs font-normal text-slate-500">MXN {prop.type === 'renta' ? '/ mes' : ''}</span>
                         </p>
 
-                        {/* Especificaciones */}
                         <div className="grid grid-cols-3 gap-2 my-3 py-2 border-y border-slate-100 text-center text-xs">
                           <div>
                             <p className="text-slate-400">Terreno</p>
@@ -566,7 +543,6 @@
                           </div>
                         </div>
 
-                        {/* Datos de Renta si aplica */}
                         {prop.type === 'renta' && prop.rentTerms && (
                           <div className="bg-amber-50/70 p-2.5 rounded-lg border border-amber-200 text-[11px] mb-3 space-y-1">
                             <p className="font-bold text-amber-900"><i className="fa-solid fa-key text-amber-600 mr-1"></i> Requisitos de Renta:</p>
@@ -576,7 +552,6 @@
                           </div>
                         )}
 
-                        {/* DATOS PRIVADOS PROPIETARIO (SÓLO ADMIN) */}
                         {authMode === 'admin' && (
                           <div className="mt-3 bg-slate-100 p-3 rounded-lg border border-slate-300 text-xs space-y-1">
                             <p className="font-bold text-slate-900 flex items-center justify-between">
@@ -588,7 +563,6 @@
                             <p><span className="font-semibold">Nombre:</span> {prop.ownerName || 'N/A'}</p>
                             <p><span className="font-semibold">Tel:</span> {prop.ownerPhone || 'N/A'}</p>
                             
-                            {/* COMENTARIO / OBSERVACIÓN DE CASA (SÓLO ADMIN) */}
                             {prop.adminComments && (
                               <div className="mt-2 pt-2 border-t border-slate-300 text-amber-900 bg-amber-100/60 p-2 rounded">
                                 <p className="font-bold text-[10px] uppercase"><i className="fa-solid fa-comment-dots mr-1"></i> Nota Interna Admin:</p>
@@ -599,7 +573,6 @@
                         )}
                       </div>
 
-                      {/* Botones */}
                       <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                         <button
                           onClick={() => { setSelectedProperty(prop); setActivePhotoIdx(0); }}
@@ -623,7 +596,6 @@
             )}
           </main>
 
-          {/* Modal de Detalle */}
           {selectedProperty && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
               <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -638,7 +610,6 @@
                 </div>
 
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Visor de Fotos */}
                   <div>
                     <div className="h-64 bg-slate-900 rounded-lg overflow-hidden relative mb-3">
                       <img
@@ -664,7 +635,6 @@
                     </div>
                   </div>
 
-                  {/* Info Detallada */}
                   <div className="flex flex-col justify-between text-xs">
                     <div>
                       <p className="text-2xl font-extrabold text-zentai-blue mb-1">
@@ -701,7 +671,6 @@
                         </ul>
                       </div>
 
-                      {/* Si es Renta, mostrar requisitos */}
                       {selectedProperty.type === 'renta' && selectedProperty.rentTerms && (
                         <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 mb-4 space-y-1">
                           <p className="font-bold text-amber-900"><i className="fa-solid fa-key mr-1"></i> Información y Requisitos de Arrendamiento:</p>
@@ -713,7 +682,6 @@
                         </div>
                       )}
 
-                      {/* Si es Venta, mostrar Infonavit */}
                       {selectedProperty.type === 'venta' && (
                         <div className="mb-4">
                           <p className="mb-1">
@@ -725,7 +693,6 @@
                         </div>
                       )}
 
-                      {/* Comentarios Privados Admin en Detalle */}
                       {authMode === 'admin' && selectedProperty.adminComments && (
                         <div className="bg-amber-100/80 p-3 rounded-lg border border-amber-300 text-amber-900">
                           <p className="font-bold mb-1"><i className="fa-solid fa-comment-dots mr-1"></i> Comentarios Internos del Administrador:</p>
@@ -748,7 +715,6 @@
             </div>
           )}
 
-          {/* Modal de Login */}
           {showLoginModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6">
@@ -794,7 +760,6 @@
             </div>
           )}
 
-          {/* Modal de Alta y Edición de Inmuebles (Administrador) */}
           {showNewModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -929,7 +894,6 @@
                     ></textarea>
                   </div>
 
-                  {/* Campos específicos si es RENTA */}
                   {formData.type === 'renta' && (
                     <div className="bg-amber-50 p-3 rounded-lg border border-amber-300 space-y-2">
                       <p className="font-bold text-amber-900"><i className="fa-solid fa-key mr-1"></i> Requisitos de Arrendamiento (Renta):</p>
@@ -960,7 +924,6 @@
                     </div>
                   )}
 
-                  {/* Campos si es VENTA */}
                   {formData.type === 'venta' && (
                     <div className="bg-slate-50 p-3 rounded border">
                       <label className="flex items-center space-x-2 font-bold text-slate-700 cursor-pointer">
@@ -975,7 +938,6 @@
                     </div>
                   )}
 
-                  {/* COMENTARIO INTERNO DEL ADMINISTRADOR */}
                   <div className="bg-amber-100/60 p-3 rounded-lg border border-amber-300">
                     <label className="font-bold text-amber-900 block mb-1">
                       <i className="fa-solid fa-comment-dots mr-1"></i> Comentario / Bitácora Interna (Sólo visible para Administrador)
@@ -989,7 +951,6 @@
                     ></textarea>
                   </div>
 
-                  {/* DATOS DEL PROPIETARIO */}
                   <div className="border border-slate-300 bg-slate-50 p-3 rounded-lg space-y-2">
                     <p className="font-bold text-slate-800 flex items-center">
                       <i className="fa-solid fa-user-lock mr-1.5 text-amber-600"></i> Datos del Propietario (Privado)
@@ -1019,7 +980,6 @@
                     </div>
                   </div>
 
-                  {/* CARGA DE FOTOS */}
                   <div>
                     <label className="font-bold text-slate-700 block mb-1">
                       Fotos del Inmueble (Hasta 10 fotos) *
@@ -1068,7 +1028,6 @@
             </div>
           )}
 
-          {/* Pie de Página */}
           <footer className="bg-zentai-dark text-slate-400 text-xs py-6 mt-12 border-t border-zentai-gold/20">
             <div className="max-w-7xl mx-auto px-4 text-center space-y-2">
               <p className="font-semibold text-slate-300">ZENTAI SERVICIOS INMOBILIARIOS</p>
