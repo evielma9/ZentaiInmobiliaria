@@ -54,13 +54,12 @@
       appId: "1:123456789:web:abcdef123456"
     };
 
-    // Inicializar Firebase de forma segura
     if (!firebase.apps.length) {
       firebase.initializeApp(firebaseConfig);
     }
     const db = firebase.database();
 
-    // Propiedades iniciales por si la base de datos está totalmente vacía
+    // Inmueble inicial si Firebase está vacío
     const initialProperties = [
       {
         controlNumber: 'ZEN-2026-001',
@@ -70,6 +69,7 @@
         price: 2850000,
         city: 'San Luis Río Colorado',
         colonia: 'Burócratas',
+        address: 'Avenida 5 y Calle 34 #1200',
         landArea: 200,
         builtArea: 160,
         roomsCount: 3,
@@ -103,14 +103,22 @@
       }
     ];
 
+    // Usuarios iniciales si Firebase está vacío
+    const initialUsers = [
+      { name: 'Administrador Principal', username: 'admin', pass: 'admin123', role: 'admin', status: 'active' },
+      { name: 'Vendedor Ventas', username: 'vendedor', pass: 'vendedor123', role: 'vendor', status: 'active' }
+    ];
+
     function App() {
       const [authMode, setAuthMode] = useState('public');
+      const [currentUserData, setCurrentUserData] = useState(null);
       const [loginUser, setLoginUser] = useState('');
       const [loginPass, setLoginPass] = useState('');
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [targetRole, setTargetRole] = useState('');
 
       const [properties, setProperties] = useState([]);
+      const [users, setUsers] = useState([]);
       const [loadingDB, setLoadingDB] = useState(true);
 
       const [selectedProperty, setSelectedProperty] = useState(null);
@@ -126,7 +134,19 @@
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
 
-      // Sincronización en tiempo real con Firebase Realtime Database
+      // Mantenimiento de Usuarios Modals & Form
+      const [showUserModal, setShowUserModal] = useState(false);
+      const [showUserFormModal, setShowUserFormModal] = useState(false);
+      const [editingUser, setEditingUser] = useState(null);
+      const [userFormData, setUserFormData] = useState({
+        name: '',
+        username: '',
+        pass: '',
+        role: 'vendor',
+        status: 'active'
+      });
+
+      // --- LEER PROPIEDADES DESDE FIREBASE ---
       useEffect(() => {
         const propRef = db.ref('properties');
         propRef.on('value', (snapshot) => {
@@ -138,21 +158,39 @@
             }));
             setProperties(loadedList);
           } else {
-            // Si la base de datos está vacía, subimos las iniciales
-            initialProperties.forEach(p => {
-              db.ref('properties').push(p);
-            });
+            initialProperties.forEach(p => db.ref('properties').push(p));
           }
           setLoadingDB(false);
         }, (error) => {
-          console.error("Error al leer Firebase:", error);
+          console.error("Error al leer propiedades:", error);
           setLoadingDB(false);
         });
 
         return () => propRef.off();
       }, []);
 
-      // Detección automática de Hash (Deep Linking) para WhatsApp
+      // --- LEER USUARIOS DESDE FIREBASE ---
+      useEffect(() => {
+        const userRef = db.ref('users');
+        userRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            const loadedUsers = Object.keys(data).map(key => ({
+              firebaseKey: key,
+              ...data[key]
+            }));
+            setUsers(loadedUsers);
+          } else {
+            initialUsers.forEach(u => db.ref('users').push(u));
+          }
+        }, (error) => {
+          console.error("Error al leer usuarios:", error);
+        });
+
+        return () => userRef.off();
+      }, []);
+
+      // Deep Linking Hash
       useEffect(() => {
         if (loadingDB) return;
         const parseHashAndOpen = () => {
@@ -181,6 +219,7 @@
         price: '',
         city: 'San Luis Río Colorado',
         colonia: '',
+        address: '',
         landArea: '',
         builtArea: '',
         roomsCount: '',
@@ -203,27 +242,98 @@
         photos: []
       });
 
+      // --- MANEJO DE LOGIN DINÁMICO ---
       const handleLoginSubmit = (e) => {
         e.preventDefault();
-        if (targetRole === 'admin') {
-          if (loginUser === 'admin' && loginPass === 'admin123') {
-            setAuthMode('admin');
-            setShowLoginModal(false);
-            setLoginUser(''); setLoginPass('');
-          } else {
-            alert('Usuario o contraseña de Administrador incorrectos.');
+        const foundUser = users.find(
+          u => u.username.toLowerCase() === loginUser.trim().toLowerCase() && 
+               u.pass === loginPass &&
+               u.role === targetRole
+        );
+
+        if (foundUser) {
+          if (foundUser.status === 'inactive') {
+            alert('Este usuario se encuentra inactivo. Contacta al Administrador.');
+            return;
           }
-        } else if (targetRole === 'vendor') {
-          if (loginUser === 'vendedor' && loginPass === 'vendedor123') {
-            setAuthMode('vendor');
-            setShowLoginModal(false);
-            setLoginUser(''); setLoginPass('');
-          } else {
-            alert('Usuario o contraseña de Vendedor incorrectos.');
-          }
+          setAuthMode(foundUser.role);
+          setCurrentUserData(foundUser);
+          setShowLoginModal(false);
+          setLoginUser('');
+          setLoginPass('');
+        } else {
+          alert(`Usuario o contraseña incorrectos para el rol ${targetRole === 'admin' ? 'Administrador' : 'Vendedor'}.`);
         }
       };
 
+      // --- MANTENIMIENTO DE USUARIOS ---
+      const handleSaveUser = (e) => {
+        e.preventDefault();
+        const userData = {
+          name: userFormData.name.trim(),
+          username: userFormData.username.trim().toLowerCase(),
+          pass: userFormData.pass,
+          role: userFormData.role,
+          status: userFormData.status
+        };
+
+        // Verificar nombre de usuario duplicado
+        const duplicate = users.find(u => u.username === userData.username && (!editingUser || u.firebaseKey !== editingUser.firebaseKey));
+        if (duplicate) {
+          alert('El nombre de usuario ya existe. Por favor elige otro.');
+          return;
+        }
+
+        if (editingUser) {
+          db.ref('users/' + editingUser.firebaseKey).set(userData)
+            .then(() => alert('Usuario actualizado correctamente en Firebase.'))
+            .catch(err => alert('Error al actualizar usuario: ' + err.message));
+        } else {
+          db.ref('users').push(userData)
+            .then(() => alert('Usuario registrado correctamente en Firebase.'))
+            .catch(err => alert('Error al crear usuario: ' + err.message));
+        }
+
+        closeUserFormModal();
+      };
+
+      const toggleUserStatus = (u) => {
+        const newStatus = u.status === 'inactive' ? 'active' : 'inactive';
+        db.ref('users/' + u.firebaseKey).update({ status: newStatus })
+          .catch(err => alert('Error al cambiar estatus del usuario: ' + err.message));
+      };
+
+      const deleteUser = (u) => {
+        if (currentUserData && currentUserData.username === u.username) {
+          alert('No puedes eliminar tu propio usuario en sesión activa.');
+          return;
+        }
+        if (confirm(`¿Estás seguro de que deseas eliminar permanentemente al usuario ${u.name} (${u.username})?`)) {
+          db.ref('users/' + u.firebaseKey).remove()
+            .then(() => alert('Usuario eliminado de Firebase.'))
+            .catch(err => alert('Error al eliminar usuario: ' + err.message));
+        }
+      };
+
+      const openEditUserModal = (u) => {
+        setEditingUser(u);
+        setUserFormData({
+          name: u.name || '',
+          username: u.username || '',
+          pass: u.pass || '',
+          role: u.role || 'vendor',
+          status: u.status || 'active'
+        });
+        setShowUserFormModal(true);
+      };
+
+      const closeUserFormModal = () => {
+        setShowUserFormModal(false);
+        setEditingUser(null);
+        setUserFormData({ name: '', username: '', pass: '', role: 'vendor', status: 'active' });
+      };
+
+      // --- MANEJO DE PROPIEDADES ---
       const handlePhotoUpload = (e) => {
         const files = Array.from(e.target.files);
         if (formData.photos.length + files.length > 10) {
@@ -257,7 +367,6 @@
         });
       };
 
-      // Guardar o actualizar directamente en Firebase
       const handleSaveProperty = (e) => {
         e.preventDefault();
         if (formData.photos.length === 0) {
@@ -290,14 +399,12 @@
         closeModalForm();
       };
 
-      // Cambiar estatus activo/inactivo en Firebase
       const togglePropertyStatus = (prop) => {
         const newStatus = prop.status === 'inactive' ? 'active' : 'inactive';
         db.ref('properties/' + prop.firebaseKey).update({ status: newStatus })
           .catch(err => alert('Error al cambiar estatus: ' + err.message));
       };
 
-      // Eliminar propiedad de Firebase
       const deleteProperty = (prop) => {
         if (confirm(`¿Estás seguro de que deseas eliminar permanentemente la propiedad con Control #${prop.controlNumber}?`)) {
           db.ref('properties/' + prop.firebaseKey).remove()
@@ -317,6 +424,7 @@
         setFormData({
           ...prop,
           status: prop.status || 'active',
+          address: prop.address || '',
           roomDetails: Array.isArray(prop.roomDetails) ? prop.roomDetails.join('\n') : prop.roomDetails,
           rentTerms: prop.rentTerms || { depositMonths: '1', guarantorRequired: true, incomeProof: true, petsAllowed: false, includedUtilities: '', minContractMonths: '12' }
         });
@@ -334,6 +442,7 @@
           price: '',
           city: 'San Luis Río Colorado',
           colonia: '',
+          address: '',
           landArea: '',
           builtArea: '',
           roomsCount: '',
@@ -385,7 +494,7 @@
         let message = `*ZENTAI SERVICIOS INMOBILIARIOS*\n\n` +
           `*Ficha de ${isRenta ? 'Renta' : 'Venta'} - Control #${prop.controlNumber}*\n` +
           `*Título:* ${prop.title}\n` +
-          `*Ubicación:* ${prop.colonia}, ${prop.city}\n` +
+          `*Dirección:* ${prop.address ? prop.address + ', ' : ''}${prop.colonia}, ${prop.city}\n` +
           `*Precio:* $${prop.price?.toLocaleString('es-MX')} MXN${isRenta ? ' / mes' : ''}\n` +
           `*Terreno:* ${prop.landArea} m² | *Construcción:* ${prop.builtArea} m²\n` +
           `*Habitaciones:* ${prop.roomsCount}\n`;
@@ -428,7 +537,7 @@
           <header className="bg-zentai-blue text-white shadow-lg sticky top-0 z-40 border-b-2 border-zentai-gold">
             <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
               
-              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); window.location.hash = ''; setSelectedProperty(null); }}>
+              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); setCurrentUserData(null); window.location.hash = ''; setSelectedProperty(null); }}>
                 <div className="w-12 h-12 bg-white rounded-full p-1 shadow-md flex items-center justify-center border-2 border-zentai-gold">
                   <svg viewBox="0 0 500 500" className="w-full h-full object-contain">
                     <circle cx="250" cy="250" r="230" fill="none" stroke="#9E9275" strokeWidth="12" />
@@ -444,7 +553,7 @@
                 </div>
                 <div>
                   <h1 className="text-lg font-extrabold tracking-wider text-white">ZENTAI INMOBILIARIA</h1>
-                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Sincronizado con Firebase</p>
+                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Catálogo Sincronizado Firebase</p>
                 </div>
               </div>
 
@@ -468,13 +577,25 @@
                   <div className="flex items-center space-x-3 bg-zentai-dark px-3 py-1.5 rounded-lg border border-zentai-gold/50 text-xs">
                     <span className="text-amber-400 font-bold uppercase flex items-center gap-1">
                       <i className={`fa-solid ${authMode === 'admin' ? 'fa-user-shield' : 'fa-user-tag'}`}></i>
-                      Modo {authMode}
+                      {currentUserData ? currentUserData.name : `Modo ${authMode}`}
                     </span>
+
+                    {/* Botón de Gestión de Usuarios sólo visible para Admin */}
+                    {authMode === 'admin' && (
+                      <button
+                        onClick={() => setShowUserModal(true)}
+                        className="bg-zentai-gold hover:bg-zentai-gold-light text-white px-2.5 py-1 rounded font-bold transition flex items-center gap-1"
+                        title="Mantenimiento de Usuarios"
+                      >
+                        <i className="fa-solid fa-users-gear"></i> Usuarios
+                      </button>
+                    )}
+
                     <button
-                      onClick={() => setAuthMode('public')}
+                      onClick={() => { setAuthMode('public'); setCurrentUserData(null); }}
                       className="bg-red-600/80 hover:bg-red-700 text-white px-2.5 py-1 rounded font-semibold transition"
                     >
-                      Cerrar Sesión
+                      Salir
                     </button>
                   </div>
                 )}
@@ -488,12 +609,20 @@
                 <span className="text-amber-900 font-bold flex items-center gap-1.5">
                   <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Modo Administrador Activo (Firebase)
                 </span>
-                <button
-                  onClick={() => { setEditingProperty(null); setShowNewModal(true); }}
-                  className="bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold px-3 py-1.5 rounded shadow flex items-center gap-1.5 transition"
-                >
-                  <i className="fa-solid fa-plus"></i> Dar de Alta Inmueble
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setShowUserModal(true)}
+                    className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded shadow flex items-center gap-1.5 transition"
+                  >
+                    <i className="fa-solid fa-users-gear"></i> Gestión de Usuarios
+                  </button>
+                  <button
+                    onClick={() => { setEditingProperty(null); setShowNewModal(true); }}
+                    className="bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold px-3 py-1.5 rounded shadow flex items-center gap-1.5 transition"
+                  >
+                    <i className="fa-solid fa-plus"></i> Dar de Alta Inmueble
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -610,7 +739,7 @@
                     <div className="p-4 flex-grow flex flex-col justify-between">
                       <div>
                         <div className="text-[11px] font-semibold text-zentai-gold uppercase tracking-wider mb-1">
-                          <i className="fa-solid fa-location-dot mr-1"></i> {prop.colonia}, {prop.city}
+                          <i className="fa-solid fa-location-dot mr-1"></i> {prop.address ? prop.address + ', ' : ''}{prop.colonia}, {prop.city}
                         </div>
                         <h3 className="font-bold text-slate-800 text-base line-clamp-1">{prop.title}</h3>
                         <p className="text-xl font-extrabold text-zentai-blue mt-1">
@@ -702,7 +831,177 @@
             )}
           </main>
 
-          {/* Modal de Detalle */}
+          {/* MODAL MANTENIMIENTO DE USUARIOS (SÓLO ADMIN) */}
+          {showUserModal && (
+            <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
+              <div className="bg-white w-full max-w-3xl rounded-2xl overflow-hidden shadow-2xl my-8">
+                <div className="bg-zentai-blue text-white p-4 flex justify-between items-center">
+                  <h2 className="font-bold text-base flex items-center gap-2">
+                    <i className="fa-solid fa-users-gear text-zentai-gold"></i> Gestor de Usuarios del Sistema (Firebase)
+                  </h2>
+                  <button onClick={() => setShowUserModal(false)} className="text-slate-300 hover:text-white text-xl">
+                    <i className="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+
+                <div className="p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <p className="text-xs text-slate-600 font-semibold">
+                      Administra las credenciales y accesos de Administradores y Vendedores.
+                    </p>
+                    <button
+                      onClick={() => { setEditingUser(null); setUserFormData({ name: '', username: '', pass: '', role: 'vendor', status: 'active' }); setShowUserFormModal(true); }}
+                      className="bg-zentai-gold hover:bg-zentai-gold-light text-white text-xs font-bold px-3 py-2 rounded shadow flex items-center gap-1.5"
+                    >
+                      <i className="fa-solid fa-user-plus"></i> Crear Nuevo Usuario
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="p-3">Nombre</th>
+                          <th className="p-3">Usuario</th>
+                          <th className="p-3">Contraseña</th>
+                          <th className="p-3">Rol</th>
+                          <th className="p-3">Estatus</th>
+                          <th className="p-3 text-center">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {users.map(u => (
+                          <tr key={u.firebaseKey} className={u.status === 'inactive' ? 'bg-red-50/50' : 'hover:bg-slate-50'}>
+                            <td className="p-3 font-semibold">{u.name}</td>
+                            <td className="p-3 font-mono text-slate-600">{u.username}</td>
+                            <td className="p-3 font-mono text-slate-600">•••••••• ({u.pass})</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                {u.role === 'admin' ? 'Admin' : 'Vendedor'}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${u.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                {u.status === 'active' ? '🟢 Activo' : '🔴 Inactivo'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center space-x-1.5">
+                              <button
+                                onClick={() => toggleUserStatus(u)}
+                                className={`px-2 py-1 rounded text-[10px] font-bold text-white ${u.status === 'inactive' ? 'bg-emerald-600' : 'bg-slate-600'}`}
+                                title={u.status === 'inactive' ? 'Activar usuario' : 'Inactivar usuario'}
+                              >
+                                <i className={`fa-solid ${u.status === 'inactive' ? 'fa-user-check' : 'fa-user-slash'}`}></i>
+                              </button>
+                              <button
+                                onClick={() => openEditUserModal(u)}
+                                className="px-2 py-1 bg-zentai-blue text-white rounded text-[10px] font-bold"
+                                title="Editar credenciales"
+                              >
+                                <i className="fa-solid fa-pen"></i>
+                              </button>
+                              <button
+                                onClick={() => deleteUser(u)}
+                                className="px-2 py-1 bg-red-600 text-white rounded text-[10px] font-bold"
+                                title="Eliminar usuario"
+                              >
+                                <i className="fa-solid fa-trash"></i>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* FORMULARIO ALTA / EDICIÓN DE USUARIO */}
+          {showUserFormModal && (
+            <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-md rounded-2xl overflow-hidden shadow-2xl p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-base text-zentai-blue">
+                    {editingUser ? 'Editar Usuario' : 'Registrar Nuevo Usuario'}
+                  </h3>
+                  <button onClick={closeUserFormModal} className="text-slate-400 hover:text-slate-600">
+                    <i className="fa-solid fa-xmark text-lg"></i>
+                  </button>
+                </div>
+                <form onSubmit={handleSaveUser} className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700">Nombre Completo *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej. Juan Pérez"
+                      value={userFormData.name}
+                      onChange={e => setUserFormData({...userFormData, name: e.target.value})}
+                      className="w-full mt-1 p-2 border rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700">Nombre de Usuario (Login) *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej. juanperez"
+                      value={userFormData.username}
+                      onChange={e => setUserFormData({...userFormData, username: e.target.value})}
+                      className="w-full mt-1 p-2 border rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700">Contraseña *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="********"
+                      value={userFormData.pass}
+                      onChange={e => setUserFormData({...userFormData, pass: e.target.value})}
+                      className="w-full mt-1 p-2 border rounded font-mono"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="font-bold text-slate-700">Rol *</label>
+                      <select
+                        value={userFormData.role}
+                        onChange={e => setUserFormData({...userFormData, role: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded bg-white"
+                      >
+                        <option value="vendor">Vendedor</option>
+                        <option value="admin">Administrador</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">Estatus *</label>
+                      <select
+                        value={userFormData.status}
+                        onChange={e => setUserFormData({...userFormData, status: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded bg-white"
+                      >
+                        <option value="active">🟢 Activo</option>
+                        <option value="inactive">🔴 Inactivo</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t flex justify-end gap-2 mt-2">
+                    <button type="button" onClick={closeUserFormModal} className="px-4 py-2 border rounded text-slate-600 font-semibold">
+                      Cancelar
+                    </button>
+                    <button type="submit" className="px-4 py-2 bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold rounded shadow">
+                      {editingUser ? 'Guardar Cambios' : 'Crear Usuario'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Modal de Detalle de Inmueble */}
           {selectedProperty && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
               <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -761,7 +1060,7 @@
                         ${selectedProperty.price?.toLocaleString('es-MX')} MXN {selectedProperty.type === 'renta' ? '/ mes' : ''}
                       </p>
                       <p className="text-slate-500 font-semibold mb-3">
-                        <i className="fa-solid fa-location-dot text-zentai-gold mr-1"></i> {selectedProperty.colonia}, {selectedProperty.city}
+                        <i className="fa-solid fa-location-dot text-zentai-gold mr-1"></i> {selectedProperty.address ? selectedProperty.address + ', ' : ''}{selectedProperty.colonia}, {selectedProperty.city}
                       </p>
 
                       <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-lg text-center mb-4">
@@ -835,6 +1134,7 @@
             </div>
           )}
 
+          {/* Modal Login */}
           {showLoginModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6">
@@ -852,7 +1152,7 @@
                     <input
                       type="text"
                       required
-                      placeholder={targetRole === 'admin' ? 'admin' : 'vendedor'}
+                      placeholder="Nombre de usuario"
                       value={loginUser}
                       onChange={e => setLoginUser(e.target.value)}
                       className="w-full mt-1 p-2 border rounded"
@@ -880,6 +1180,7 @@
             </div>
           )}
 
+          {/* Modal Alta / Edición Inmueble */}
           {showNewModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -954,7 +1255,7 @@
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                       <label className="font-bold text-slate-700">Ciudad *</label>
                       <input
@@ -971,9 +1272,20 @@
                       <input
                         type="text"
                         required
-                        placeholder="Ej. Burócratas / Comercial"
+                        placeholder="Ej. Burócratas"
                         value={formData.colonia}
                         onChange={e => setFormData({...formData, colonia: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700">Dirección / Calle y Número *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Ej. Av. Hidalgo #1520"
+                        value={formData.address}
+                        onChange={e => setFormData({...formData, address: e.target.value})}
                         className="w-full mt-1 p-2 border rounded"
                       />
                     </div>
