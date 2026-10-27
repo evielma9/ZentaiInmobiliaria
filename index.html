@@ -101,6 +101,7 @@
 
       const [selectedProperty, setSelectedProperty] = useState(null);
       const [activePhotoIdx, setActivePhotoIdx] = useState(0);
+      const [copySuccess, setCopySuccess] = useState(false);
 
       const [activeTab, setActiveTab] = useState('venta');
       const [filterSearch, setFilterSearch] = useState('');
@@ -110,6 +111,26 @@
 
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
+
+      // Detección de Hash en URL al cargar o cambiar dirección (Deep Linking)
+      useEffect(() => {
+        const checkHash = () => {
+          const hash = window.location.hash;
+          if (hash.startsWith('#/inmueble/')) {
+            const ctrlNum = hash.replace('#/inmueble/', '');
+            const found = properties.find(p => p.controlNumber === ctrlNum || p.id === ctrlNum);
+            if (found) {
+              setSelectedProperty(found);
+              setActiveTab(found.type || 'venta');
+              setActivePhotoIdx(0);
+            }
+          }
+        };
+
+        checkHash();
+        window.addEventListener('hashchange', checkHash);
+        return () => window.removeEventListener('hashchange', checkHash);
+      }, [properties]);
 
       const [formData, setFormData] = useState({
         controlNumber: '',
@@ -261,8 +282,40 @@
         });
       };
 
+      // Copiar la foto actual al portapapeles
+      const copyImageToClipboard = async (photoSrc) => {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = photoSrc;
+          img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            canvas.toBlob(async (blob) => {
+              if (blob) {
+                await navigator.clipboard.write([
+                  new ClipboardItem({ [blob.type]: blob })
+                ]);
+                setCopySuccess(true);
+                setTimeout(() => setCopySuccess(false), 3000);
+              }
+            }, 'image/png');
+          };
+        } catch (err) {
+          alert('Foto lista para compartir. Usa la opción "Ver Fotos" desde el link compartido.');
+        }
+      };
+
+      // WhatsApp con Link directo por Hash a la propiedad
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
+        const baseUrl = window.location.href.split('#')[0];
+        const directLink = `${baseUrl}#/inmueble/${prop.controlNumber}`;
+
         let message = `*Zentai Servicios Inmobiliarios*\n\n` +
           `*Ficha de ${isRenta ? 'Renta' : 'Venta'} - Control #${prop.controlNumber}*\n` +
           `*Título:* ${prop.title}\n` +
@@ -282,7 +335,7 @@
 
         message += `\n*Distribución:*\n` +
           (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
-          `*Consulta más detalles en nuestro catálogo digital.*`;
+          `📸 *Ver Galería de Fotos y Detalles Directos:* ${directLink}`;
 
         const encoded = encodeURIComponent(message);
         window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
@@ -307,7 +360,7 @@
           <header className="bg-zentai-blue text-white shadow-lg sticky top-0 z-40 border-b-2 border-zentai-gold">
             <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
               
-              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); }}>
+              <div className="flex items-center space-x-3 cursor-pointer" onClick={() => { setAuthMode('public'); window.location.hash = ''; setSelectedProperty(null); }}>
                 <div className="w-12 h-12 bg-white rounded-full p-1 shadow-md flex items-center justify-center border-2 border-zentai-gold">
                   <svg viewBox="0 0 500 500" className="w-full h-full object-contain">
                     <circle cx="250" cy="250" r="230" fill="none" stroke="#9E9275" strokeWidth="12" />
@@ -530,10 +583,14 @@
 
                       <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                         <button
-                          onClick={() => { setSelectedProperty(prop); setActivePhotoIdx(0); }}
+                          onClick={() => { 
+                            setSelectedProperty(prop); 
+                            setActivePhotoIdx(0); 
+                            window.location.hash = `#/inmueble/${prop.controlNumber}`;
+                          }}
                           className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded-lg transition"
                         >
-                          Ver Detalles
+                          Ver Detalles y Fotos
                         </button>
 
                         <button
@@ -551,6 +608,7 @@
             )}
           </main>
 
+          {/* Modal de Detalle y Galería Completa de Fotos */}
           {selectedProperty && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
               <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -559,14 +617,15 @@
                     <span className="text-xs text-zentai-gold font-bold">CONTROL #{selectedProperty.controlNumber}</span>
                     <h2 className="text-lg font-bold">{selectedProperty.title}</h2>
                   </div>
-                  <button onClick={() => setSelectedProperty(null)} className="text-slate-300 hover:text-white text-xl">
+                  <button onClick={() => { setSelectedProperty(null); window.location.hash = ''; }} className="text-slate-300 hover:text-white text-xl">
                     <i className="fa-solid fa-xmark"></i>
                   </button>
                 </div>
 
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <div className="h-64 bg-slate-900 rounded-lg overflow-hidden relative mb-3">
+                    {/* Visor de Foto Principal */}
+                    <div className="h-64 bg-slate-900 rounded-lg overflow-hidden relative mb-3 group">
                       <img
                         src={selectedProperty.photos?.[activePhotoIdx] || 'https://via.placeholder.com/600x400?text=Sin+Foto'}
                         alt="Foto amplia"
@@ -575,7 +634,22 @@
                       <div className="absolute bottom-2 left-2 bg-black/60 text-white text-xs px-2 py-0.5 rounded">
                         {activePhotoIdx + 1} de {selectedProperty.photos?.length || 0}
                       </div>
+
+                      {/* Botón para Copiar Foto al Portapapeles */}
+                      <button
+                        onClick={() => copyImageToClipboard(selectedProperty.photos?.[activePhotoIdx])}
+                        className="absolute bottom-2 right-2 bg-zentai-gold hover:bg-zentai-gold-light text-white text-[11px] font-bold px-2.5 py-1 rounded shadow flex items-center gap-1.5 transition"
+                        title="Copiar foto actual para pegar directamente en WhatsApp"
+                      >
+                        <i className="fa-solid fa-copy"></i> Copiar Foto
+                      </button>
                     </div>
+
+                    {copySuccess && (
+                      <div className="mb-2 p-2 bg-emerald-100 border border-emerald-300 text-emerald-800 text-[11px] rounded text-center font-bold">
+                        ¡Foto copiada al portapapeles! Abre WhatsApp y presiona Ctrl + V para pegarla.
+                      </div>
+                    )}
 
                     <div className="flex gap-2 overflow-x-auto pb-2">
                       {selectedProperty.photos?.map((ph, idx) => (
@@ -656,10 +730,10 @@
                       )}
                     </div>
 
-                    <div className="pt-4 border-t border-slate-100">
+                    <div className="pt-4 border-t border-slate-100 flex gap-2">
                       <button
                         onClick={() => sendWhatsApp(selectedProperty)}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg shadow transition flex items-center justify-center gap-2"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg shadow transition flex items-center justify-center gap-2"
                       >
                         <i className="fa-brands fa-whatsapp text-base"></i> Enviar Ficha por WhatsApp
                       </button>
