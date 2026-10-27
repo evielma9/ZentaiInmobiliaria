@@ -45,6 +45,7 @@
         controlNumber: 'ZEN-2026-001',
         title: 'Casa Moderna en Residencia Los Olivos',
         type: 'venta',
+        status: 'active', // 'active' (Publicado) u 'inactive' (Oculto)
         price: 2850000,
         city: 'San Luis Río Colorado',
         colonia: 'Burócratas',
@@ -112,14 +113,14 @@
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
 
-      // Detección de Hash en URL al cargar o cambiar dirección (Deep Linking)
+      // Detección de Hash en URL (Deep Linking)
       useEffect(() => {
         const checkHash = () => {
           const hash = window.location.hash;
           if (hash.startsWith('#/inmueble/')) {
             const ctrlNum = hash.replace('#/inmueble/', '');
             const found = properties.find(p => p.controlNumber === ctrlNum || p.id === ctrlNum);
-            if (found) {
+            if (found && (authMode === 'admin' || found.status !== 'inactive')) {
               setSelectedProperty(found);
               setActiveTab(found.type || 'venta');
               setActivePhotoIdx(0);
@@ -130,12 +131,13 @@
         checkHash();
         window.addEventListener('hashchange', checkHash);
         return () => window.removeEventListener('hashchange', checkHash);
-      }, [properties]);
+      }, [properties, authMode]);
 
       const [formData, setFormData] = useState({
         controlNumber: '',
         title: '',
         type: 'venta',
+        status: 'active',
         price: '',
         city: 'San Luis Río Colorado',
         colonia: '',
@@ -246,10 +248,34 @@
         closeModalForm();
       };
 
+      // Alternar estado activo / inactivo directamente desde la tarjeta (Admin)
+      const togglePropertyStatus = (id) => {
+        setProperties(properties.map(p => {
+          if (p.id === id) {
+            const newStatus = p.status === 'inactive' ? 'active' : 'inactive';
+            return { ...p, status: newStatus };
+          }
+          return p;
+        }));
+      };
+
+      // Eliminar propiedad (Admin)
+      const deleteProperty = (prop) => {
+        if (confirm(`¿Estás seguro de que deseas eliminar permanentemente la propiedad con Control #${prop.controlNumber}?`)) {
+          setProperties(properties.filter(p => p.id !== prop.id));
+          if (selectedProperty && selectedProperty.id === prop.id) {
+            setSelectedProperty(null);
+            window.location.hash = '';
+          }
+          alert('Propiedad eliminada con éxito.');
+        }
+      };
+
       const openEditModal = (prop) => {
         setEditingProperty(prop);
         setFormData({
           ...prop,
+          status: prop.status || 'active',
           roomDetails: Array.isArray(prop.roomDetails) ? prop.roomDetails.join('\n') : prop.roomDetails,
           rentTerms: prop.rentTerms || { depositMonths: '1', guarantorRequired: true, incomeProof: true, petsAllowed: false, includedUtilities: '', minContractMonths: '12' }
         });
@@ -263,6 +289,7 @@
           controlNumber: '',
           title: '',
           type: 'venta',
+          status: 'active',
           price: '',
           city: 'San Luis Río Colorado',
           colonia: '',
@@ -282,7 +309,6 @@
         });
       };
 
-      // Copiar la foto actual al portapapeles
       const copyImageToClipboard = async (photoSrc) => {
         try {
           const img = new Image();
@@ -310,7 +336,6 @@
         }
       };
 
-      // WhatsApp con Link directo por Hash a la propiedad
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
         const baseUrl = window.location.href.split('#')[0];
@@ -345,6 +370,9 @@
       const coloniasList = [...new Set(properties.map(p => p.colonia).filter(Boolean))];
 
       const filtered = properties.filter(p => {
+        // Si no es admin, ocultar las inactivas
+        if (authMode !== 'admin' && p.status === 'inactive') return false;
+
         const matchTab = (p.type || 'venta') === activeTab;
         const matchSearch = p.title.toLowerCase().includes(filterSearch.toLowerCase()) || 
                             p.controlNumber.toLowerCase().includes(filterSearch.toLowerCase());
@@ -418,7 +446,7 @@
             <div className="bg-amber-50 border-b border-amber-200 py-2.5 shadow-inner">
               <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs">
                 <span className="text-amber-900 font-bold flex items-center gap-1.5">
-                  <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Panel de Administración Activo: Tienes permisos para dar de alta, editar y ver notas internas.
+                  <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Modo Administrador: Puedes eliminar, ocultar/activar y editar cualquier inmueble.
                 </span>
                 <button
                   onClick={() => { setEditingProperty(null); setShowNewModal(true); }}
@@ -505,7 +533,7 @@
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filtered.map(prop => (
-                  <div key={prop.id} className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col hover:shadow-lg transition">
+                  <div key={prop.id} className={`bg-white rounded-xl shadow-md border overflow-hidden flex flex-col hover:shadow-lg transition ${prop.status === 'inactive' ? 'border-red-300 bg-red-50/20 opacity-80' : 'border-slate-200'}`}>
                     
                     <div className="relative h-48 bg-slate-100 overflow-hidden group">
                       <img
@@ -517,8 +545,17 @@
                         #{prop.controlNumber}
                       </div>
 
-                      <div className={`absolute top-2 right-2 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shadow ${prop.type === 'renta' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white'}`}>
-                        {prop.type === 'renta' ? 'En Renta' : 'En Venta'}
+                      <div className="absolute top-2 right-2 flex flex-col gap-1 items-end">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider shadow ${prop.type === 'renta' ? 'bg-amber-600 text-white' : 'bg-emerald-600 text-white'}`}>
+                          {prop.type === 'renta' ? 'En Renta' : 'En Venta'}
+                        </span>
+
+                        {/* Indicador de Estado Inactivo (Sólo visible para Admin) */}
+                        {prop.status === 'inactive' && (
+                          <span className="bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded uppercase tracking-wider shadow">
+                            <i className="fa-solid fa-eye-slash mr-1"></i> Oculto / Inactivo
+                          </span>
+                        )}
                       </div>
 
                       <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
@@ -556,25 +593,40 @@
                             <p className="font-bold text-amber-900"><i className="fa-solid fa-key text-amber-600 mr-1"></i> Requisitos de Renta:</p>
                             <p>• Depósito: <span className="font-semibold">{prop.rentTerms.depositMonths} mes(es)</span></p>
                             <p>• Aval/Fiador: <span className="font-semibold">{prop.rentTerms.guarantorRequired ? 'Requerido' : 'No necesario'}</span></p>
-                            <p>• Mascotas: <span className="font-semibold">{prop.rentTerms.petsAllowed ? 'Permitidas' : 'No permitidas'}</span></p>
                           </div>
                         )}
 
+                        {/* PANEL DE CONTROL DE ADMINISTRADOR PARA EDITAR, ACTIVAR/OCULTAR Y BORRAR */}
                         {authMode === 'admin' && (
-                          <div className="mt-3 bg-slate-100 p-3 rounded-lg border border-slate-300 text-xs space-y-1">
-                            <p className="font-bold text-slate-900 flex items-center justify-between">
-                              <span><i className="fa-solid fa-lock text-amber-600 mr-1"></i> Propietario (Privado):</span>
-                              <button onClick={() => openEditModal(prop)} className="text-[10px] bg-zentai-blue text-white px-2 py-0.5 rounded hover:bg-zentai-dark">
-                                <i className="fa-solid fa-pen mr-1"></i> Editar
-                              </button>
-                            </p>
-                            <p><span className="font-semibold">Nombre:</span> {prop.ownerName || 'N/A'}</p>
-                            <p><span className="font-semibold">Tel:</span> {prop.ownerPhone || 'N/A'}</p>
-                            
+                          <div className="mt-3 bg-slate-100 p-3 rounded-lg border border-slate-300 text-xs space-y-2">
+                            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                              <span className="font-bold text-slate-800"><i className="fa-solid fa-sliders text-amber-600 mr-1"></i> Control Admin</span>
+                              
+                              <div className="flex gap-1.5">
+                                <button
+                                  onClick={() => togglePropertyStatus(prop.id)}
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded transition ${prop.status === 'inactive' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-700 hover:bg-slate-800 text-white'}`}
+                                  title={prop.status === 'inactive' ? 'Hacer visible al público' : 'Ocultar al público'}
+                                >
+                                  <i className={`fa-solid ${prop.status === 'inactive' ? 'fa-eye' : 'fa-eye-slash'} mr-1`}></i>
+                                  {prop.status === 'inactive' ? 'Activar' : 'Ocultar'}
+                                </button>
+
+                                <button onClick={() => openEditModal(prop)} className="text-[10px] bg-zentai-blue text-white px-2 py-0.5 rounded hover:bg-zentai-dark">
+                                  <i className="fa-solid fa-pen"></i> Editar
+                                </button>
+
+                                <button onClick={() => deleteProperty(prop)} className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700" title="Eliminar propiedad">
+                                  <i className="fa-solid fa-trash"></i>
+                                </button>
+                              </div>
+                            </div>
+
+                            <p><span className="font-semibold">Propietario:</span> {prop.ownerName || 'N/A'} ({prop.ownerPhone || 'Sin teléfono'})</p>
+
                             {prop.adminComments && (
-                              <div className="mt-2 pt-2 border-t border-slate-300 text-amber-900 bg-amber-100/60 p-2 rounded">
-                                <p className="font-bold text-[10px] uppercase"><i className="fa-solid fa-comment-dots mr-1"></i> Nota Interna Admin:</p>
-                                <p className="italic text-[11px]">{prop.adminComments}</p>
+                              <div className="text-amber-900 bg-amber-100/60 p-1.5 rounded text-[11px] italic">
+                                "{prop.adminComments}"
                               </div>
                             )}
                           </div>
@@ -608,7 +660,7 @@
             )}
           </main>
 
-          {/* Modal de Detalle y Galería Completa de Fotos */}
+          {/* Modal de Detalle */}
           {selectedProperty && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto backdrop-blur-sm">
               <div className="bg-white w-full max-w-4xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -624,7 +676,6 @@
 
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    {/* Visor de Foto Principal */}
                     <div className="h-64 bg-slate-900 rounded-lg overflow-hidden relative mb-3 group">
                       <img
                         src={selectedProperty.photos?.[activePhotoIdx] || 'https://via.placeholder.com/600x400?text=Sin+Foto'}
@@ -635,11 +686,9 @@
                         {activePhotoIdx + 1} de {selectedProperty.photos?.length || 0}
                       </div>
 
-                      {/* Botón para Copiar Foto al Portapapeles */}
                       <button
                         onClick={() => copyImageToClipboard(selectedProperty.photos?.[activePhotoIdx])}
                         className="absolute bottom-2 right-2 bg-zentai-gold hover:bg-zentai-gold-light text-white text-[11px] font-bold px-2.5 py-1 rounded shadow flex items-center gap-1.5 transition"
-                        title="Copiar foto actual para pegar directamente en WhatsApp"
                       >
                         <i className="fa-solid fa-copy"></i> Copiar Foto
                       </button>
@@ -744,6 +793,7 @@
             </div>
           )}
 
+          {/* Modal de Login */}
           {showLoginModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6">
@@ -789,6 +839,7 @@
             </div>
           )}
 
+          {/* Modal Alta / Edición de Inmueble */}
           {showNewModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -802,7 +853,7 @@
                 </div>
 
                 <form onSubmit={handleSaveProperty} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto text-xs">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div>
                       <label className="font-bold text-slate-700">Operación *</label>
                       <select
@@ -814,6 +865,20 @@
                         <option value="renta">Renta</option>
                       </select>
                     </div>
+
+                    {/* SELECTOR DE ESTATUS VISIBLE / OCULTO */}
+                    <div>
+                      <label className="font-bold text-slate-700">Estatus Publicación *</label>
+                      <select
+                        value={formData.status}
+                        onChange={e => setFormData({...formData, status: e.target.value})}
+                        className="w-full mt-1 p-2 border rounded bg-white font-bold"
+                      >
+                        <option value="active">🟢 Activo (Publicado)</option>
+                        <option value="inactive">🔴 Inactivo (Oculto)</option>
+                      </select>
+                    </div>
+
                     <div>
                       <label className="font-bold text-slate-700"># Control *</label>
                       <input
