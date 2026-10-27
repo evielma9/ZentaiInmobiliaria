@@ -13,11 +13,6 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel CDN for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- Firebase App (Core) SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-  <!-- Firebase Realtime Database SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   
   <script>
     tailwind.config = {
@@ -43,24 +38,7 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // --- CONFIGURACIÓN DE FIREBASE ---
-    const firebaseConfig = {
-      apiKey: "TU_API_KEY",
-      authDomain: "zentaiinmobiliaria.firebaseapp.com",
-      databaseURL: "https://zentaiinmobiliaria-default-rtdb.firebaseio.com",
-      projectId: "zentaiinmobiliaria",
-      storageBucket: "zentaiinmobiliaria.appspot.com",
-      messagingSenderId: "123456789",
-      appId: "1:123456789:web:abcdef123456"
-    };
-
-    // Inicializar Firebase de forma segura
-    if (!firebase.apps.length) {
-      firebase.initializeApp(firebaseConfig);
-    }
-    const db = firebase.database();
-
-    // Propiedades iniciales por si la base de datos está vacía
+    // Propiedades iniciales locales
     const initialProperties = [
       {
         id: 'ZEN-2026-001',
@@ -110,32 +88,16 @@
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [targetRole, setTargetRole] = useState('');
 
-      const [properties, setProperties] = useState([]);
-      const [loadingDB, setLoadingDB] = useState(true);
+      // Cargar propiedades desde localStorage
+      const [properties, setProperties] = useState(() => {
+        const saved = localStorage.getItem('zentai_properties_local');
+        return saved ? JSON.parse(saved) : initialProperties;
+      });
 
+      // Guardar cambios automáticamente en localStorage
       useEffect(() => {
-        const propRef = db.ref('properties');
-        propRef.on('value', (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            const loadedList = Object.keys(data).map(key => ({
-              firebaseKey: key,
-              ...data[key]
-            }));
-            setProperties(loadedList);
-          } else {
-            initialProperties.forEach(p => {
-              db.ref('properties').push(p);
-            });
-          }
-          setLoadingDB(false);
-        }, (error) => {
-          console.error("Error al leer Firebase:", error);
-          setLoadingDB(false);
-        });
-
-        return () => propRef.off();
-      }, []);
+        localStorage.setItem('zentai_properties_local', JSON.stringify(properties));
+      }, [properties]);
 
       const [selectedProperty, setSelectedProperty] = useState(null);
       const [activePhotoIdx, setActivePhotoIdx] = useState(0);
@@ -241,6 +203,7 @@
 
         const propData = {
           ...formData,
+          id: editingProperty ? editingProperty.id : (`ZEN-${Date.now()}`),
           controlNumber: formData.controlNumber || `ZEN-${Date.now()}`,
           price: Number(formData.price),
           landArea: Number(formData.landArea),
@@ -252,13 +215,11 @@
         };
 
         if (editingProperty) {
-          db.ref('properties/' + editingProperty.firebaseKey).set(propData)
-            .then(() => alert('Inmueble actualizado correctamente'))
-            .catch(err => alert('Error al actualizar: ' + err.message));
+          setProperties(properties.map(p => p.id === editingProperty.id ? propData : p));
+          alert('Inmueble actualizado correctamente');
         } else {
-          db.ref('properties').push(propData)
-            .then(() => alert('Inmueble dado de alta en Firebase correctamente'))
-            .catch(err => alert('Error al guardar: ' + err.message));
+          setProperties([propData, ...properties]);
+          alert('Inmueble dado de alta correctamente');
         }
 
         closeModalForm();
@@ -300,7 +261,6 @@
         });
       };
 
-      // --- FUNCIÓN DE WHATSAPP CORREGIDA ---
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
         let message = `*Zentai Servicios Inmobiliarios*\n\n` +
@@ -322,7 +282,7 @@
 
         message += `\n*Distribución:*\n` +
           (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
-          `*Consulta más detalles y fotos en nuestro catálogo digital.*`;
+          `*Consulta más detalles en nuestro catálogo digital.*`;
 
         const encoded = encodeURIComponent(message);
         window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
@@ -363,7 +323,7 @@
                 </div>
                 <div>
                   <h1 className="text-lg font-extrabold tracking-wider text-white">ZENTAI INMOBILIARIA</h1>
-                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Catálogo Sincronizado Firebase</p>
+                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Catálogo Inmobiliario Profesional</p>
                 </div>
               </div>
 
@@ -484,12 +444,7 @@
               )}
             </div>
 
-            {loadingDB ? (
-              <div className="text-center py-16 text-slate-500">
-                <i className="fa-solid fa-spinner fa-spin text-3xl text-zentai-gold mb-2"></i>
-                <p>Cargando datos desde Firebase...</p>
-              </div>
-            ) : filtered.length === 0 ? (
+            {filtered.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
                 <i className="fa-solid fa-house-circle-xmark text-4xl text-slate-300 mb-2"></i>
                 <p className="text-slate-600 font-semibold text-sm">No se encontraron inmuebles registrados para esta categoría o filtros.</p>
@@ -497,7 +452,7 @@
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filtered.map(prop => (
-                  <div key={prop.firebaseKey || prop.id} className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col hover:shadow-lg transition">
+                  <div key={prop.id} className="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden flex flex-col hover:shadow-lg transition">
                     
                     <div className="relative h-48 bg-slate-100 overflow-hidden group">
                       <img
@@ -765,7 +720,7 @@
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
                 <div className="bg-zentai-blue text-white p-4 flex justify-between items-center">
                   <h2 className="font-bold text-base flex items-center gap-2">
-                    <i className="fa-solid fa-house-medical text-zentai-gold"></i> {editingProperty ? 'Editar Inmueble' : 'Alta de Nuevo Inmueble'} (Firebase)
+                    <i className="fa-solid fa-house-medical text-zentai-gold"></i> {editingProperty ? 'Editar Inmueble' : 'Alta de Nuevo Inmueble'}
                   </h2>
                   <button onClick={closeModalForm} className="text-slate-300 hover:text-white">
                     <i className="fa-solid fa-xmark text-lg"></i>
@@ -1020,7 +975,7 @@
                       type="submit"
                       className="px-4 py-2 bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold rounded shadow"
                     >
-                      {editingProperty ? 'Guardar Cambios' : 'Registrar en Firebase'}
+                      {editingProperty ? 'Guardar Cambios' : 'Registrar Inmueble'}
                     </button>
                   </div>
                 </form>
@@ -1032,7 +987,7 @@
             <div className="max-w-7xl mx-auto px-4 text-center space-y-2">
               <p className="font-semibold text-slate-300">ZENTAI SERVICIOS INMOBILIARIOS</p>
               <p className="text-[11px] text-slate-500">
-                Sistema Inmobiliario en Tiempo Real con Firebase Realtime Database
+                Sistema Inmobiliario Profesional
               </p>
             </div>
           </footer>
