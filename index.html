@@ -38,14 +38,14 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // Propiedades iniciales locales
+    // Propiedades iniciales por defecto
     const initialProperties = [
       {
         id: 'ZEN-2026-001',
         controlNumber: 'ZEN-2026-001',
         title: 'Casa Moderna en Residencia Los Olivos',
         type: 'venta',
-        status: 'active', // 'active' (Publicado) u 'inactive' (Oculto)
+        status: 'active',
         price: 2850000,
         city: 'San Luis Río Colorado',
         colonia: 'Burócratas',
@@ -89,13 +89,11 @@
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [targetRole, setTargetRole] = useState('');
 
-      // Cargar propiedades desde localStorage
       const [properties, setProperties] = useState(() => {
         const saved = localStorage.getItem('zentai_properties_local');
         return saved ? JSON.parse(saved) : initialProperties;
       });
 
-      // Guardar cambios automáticamente en localStorage
       useEffect(() => {
         localStorage.setItem('zentai_properties_local', JSON.stringify(properties));
       }, [properties]);
@@ -113,25 +111,25 @@
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
 
-      // Detección de Hash en URL (Deep Linking)
+      // DEEP LINKING: Abrir automáticamente el modal si el hash en la URL coincide con un # de control
       useEffect(() => {
-        const checkHash = () => {
+        const parseHashAndOpen = () => {
           const hash = window.location.hash;
-          if (hash.startsWith('#/inmueble/')) {
-            const ctrlNum = hash.replace('#/inmueble/', '');
-            const found = properties.find(p => p.controlNumber === ctrlNum || p.id === ctrlNum);
-            if (found && (authMode === 'admin' || found.status !== 'inactive')) {
-              setSelectedProperty(found);
-              setActiveTab(found.type || 'venta');
+          if (hash.includes('#/inmueble/')) {
+            const ctrl = decodeURIComponent(hash.split('#/inmueble/')[1]);
+            const match = properties.find(p => p.controlNumber === ctrl || p.id === ctrl);
+            if (match) {
+              setSelectedProperty(match);
+              setActiveTab(match.type || 'venta');
               setActivePhotoIdx(0);
             }
           }
         };
 
-        checkHash();
-        window.addEventListener('hashchange', checkHash);
-        return () => window.removeEventListener('hashchange', checkHash);
-      }, [properties, authMode]);
+        parseHashAndOpen();
+        window.addEventListener('hashchange', parseHashAndOpen);
+        return () => window.removeEventListener('hashchange', parseHashAndOpen);
+      }, [properties]);
 
       const [formData, setFormData] = useState({
         controlNumber: '',
@@ -248,7 +246,6 @@
         closeModalForm();
       };
 
-      // Alternar estado activo / inactivo directamente desde la tarjeta (Admin)
       const togglePropertyStatus = (id) => {
         setProperties(properties.map(p => {
           if (p.id === id) {
@@ -259,7 +256,6 @@
         }));
       };
 
-      // Eliminar propiedad (Admin)
       const deleteProperty = (prop) => {
         if (confirm(`¿Estás seguro de que deseas eliminar permanentemente la propiedad con Control #${prop.controlNumber}?`)) {
           setProperties(properties.filter(p => p.id !== prop.id));
@@ -336,12 +332,14 @@
         }
       };
 
+      // ENVÍO DE WHATSAPP MEJORADO
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
-        const baseUrl = window.location.href.split('#')[0];
-        const directLink = `${baseUrl}#/inmueble/${prop.controlNumber}`;
+        // Construir la URL completa actual sin el hash previo
+        const cleanBaseUrl = window.location.href.split('#')[0];
+        const directLink = `${cleanBaseUrl}#/inmueble/${encodeURIComponent(prop.controlNumber)}`;
 
-        let message = `*Zentai Servicios Inmobiliarios*\n\n` +
+        let message = `*ZENTAI SERVICIOS INMOBILIARIOS*\n\n` +
           `*Ficha de ${isRenta ? 'Renta' : 'Venta'} - Control #${prop.controlNumber}*\n` +
           `*Título:* ${prop.title}\n` +
           `*Ubicación:* ${prop.colonia}, ${prop.city}\n` +
@@ -358,9 +356,9 @@
                      `*Créditos:* ${prop.credits?.join(', ') || 'N/A'}\n`;
         }
 
-        message += `\n*Distribución:*\n` +
+        message += `\n*Distribución de la Vivienda:*\n` +
           (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
-          `📸 *Ver Galería de Fotos y Detalles Directos:* ${directLink}`;
+          `📸 *Ver Galería Completa de Fotos:* ${directLink}`;
 
         const encoded = encodeURIComponent(message);
         window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
@@ -370,7 +368,6 @@
       const coloniasList = [...new Set(properties.map(p => p.colonia).filter(Boolean))];
 
       const filtered = properties.filter(p => {
-        // Si no es admin, ocultar las inactivas
         if (authMode !== 'admin' && p.status === 'inactive') return false;
 
         const matchTab = (p.type || 'venta') === activeTab;
@@ -550,7 +547,6 @@
                           {prop.type === 'renta' ? 'En Renta' : 'En Venta'}
                         </span>
 
-                        {/* Indicador de Estado Inactivo (Sólo visible para Admin) */}
                         {prop.status === 'inactive' && (
                           <span className="bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded uppercase tracking-wider shadow">
                             <i className="fa-solid fa-eye-slash mr-1"></i> Oculto / Inactivo
@@ -596,7 +592,6 @@
                           </div>
                         )}
 
-                        {/* PANEL DE CONTROL DE ADMINISTRADOR PARA EDITAR, ACTIVAR/OCULTAR Y BORRAR */}
                         {authMode === 'admin' && (
                           <div className="mt-3 bg-slate-100 p-3 rounded-lg border border-slate-300 text-xs space-y-2">
                             <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
@@ -606,7 +601,6 @@
                                 <button
                                   onClick={() => togglePropertyStatus(prop.id)}
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded transition ${prop.status === 'inactive' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-700 hover:bg-slate-800 text-white'}`}
-                                  title={prop.status === 'inactive' ? 'Hacer visible al público' : 'Ocultar al público'}
                                 >
                                   <i className={`fa-solid ${prop.status === 'inactive' ? 'fa-eye' : 'fa-eye-slash'} mr-1`}></i>
                                   {prop.status === 'inactive' ? 'Activar' : 'Ocultar'}
@@ -616,7 +610,7 @@
                                   <i className="fa-solid fa-pen"></i> Editar
                                 </button>
 
-                                <button onClick={() => deleteProperty(prop)} className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700" title="Eliminar propiedad">
+                                <button onClick={() => deleteProperty(prop)} className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700">
                                   <i className="fa-solid fa-trash"></i>
                                 </button>
                               </div>
@@ -638,7 +632,7 @@
                           onClick={() => { 
                             setSelectedProperty(prop); 
                             setActivePhotoIdx(0); 
-                            window.location.hash = `#/inmueble/${prop.controlNumber}`;
+                            window.location.hash = `#/inmueble/${encodeURIComponent(prop.controlNumber)}`;
                           }}
                           className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold py-2 rounded-lg transition"
                         >
@@ -793,7 +787,6 @@
             </div>
           )}
 
-          {/* Modal de Login */}
           {showLoginModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4">
               <div className="bg-white w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl p-6">
@@ -839,7 +832,6 @@
             </div>
           )}
 
-          {/* Modal Alta / Edición de Inmueble */}
           {showNewModal && (
             <div className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 overflow-y-auto">
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
@@ -866,7 +858,6 @@
                       </select>
                     </div>
 
-                    {/* SELECTOR DE ESTATUS VISIBLE / OCULTO */}
                     <div>
                       <label className="font-bold text-slate-700">Estatus Publicación *</label>
                       <select
