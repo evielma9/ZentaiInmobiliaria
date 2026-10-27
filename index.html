@@ -13,6 +13,11 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <!-- Babel CDN for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase App (Core) SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <!-- Firebase Realtime Database SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
   
   <script>
     tailwind.config = {
@@ -38,10 +43,26 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // Propiedades iniciales por defecto
+    // --- CONFIGURACIÓN DE FIREBASE ---
+    const firebaseConfig = {
+      apiKey: "TU_API_KEY",
+      authDomain: "zentaiinmobiliaria.firebaseapp.com",
+      databaseURL: "https://zentaiinmobiliaria-default-rtdb.firebaseio.com",
+      projectId: "zentaiinmobiliaria",
+      storageBucket: "zentaiinmobiliaria.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:abcdef123456"
+    };
+
+    // Inicializar Firebase de forma segura
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    const db = firebase.database();
+
+    // Propiedades iniciales por si la base de datos está totalmente vacía
     const initialProperties = [
       {
-        id: 'ZEN-2026-001',
         controlNumber: 'ZEN-2026-001',
         title: 'Casa Moderna en Residencia Los Olivos',
         type: 'venta',
@@ -89,14 +110,8 @@
       const [showLoginModal, setShowLoginModal] = useState(false);
       const [targetRole, setTargetRole] = useState('');
 
-      const [properties, setProperties] = useState(() => {
-        const saved = localStorage.getItem('zentai_properties_local');
-        return saved ? JSON.parse(saved) : initialProperties;
-      });
-
-      useEffect(() => {
-        localStorage.setItem('zentai_properties_local', JSON.stringify(properties));
-      }, [properties]);
+      const [properties, setProperties] = useState([]);
+      const [loadingDB, setLoadingDB] = useState(true);
 
       const [selectedProperty, setSelectedProperty] = useState(null);
       const [activePhotoIdx, setActivePhotoIdx] = useState(0);
@@ -111,14 +126,41 @@
       const [showNewModal, setShowNewModal] = useState(false);
       const [editingProperty, setEditingProperty] = useState(null);
 
-      // DEEP LINKING: Abrir automáticamente el modal si el hash en la URL coincide con un # de control
+      // Sincronización en tiempo real con Firebase Realtime Database
       useEffect(() => {
+        const propRef = db.ref('properties');
+        propRef.on('value', (snapshot) => {
+          const data = snapshot.val();
+          if (data) {
+            const loadedList = Object.keys(data).map(key => ({
+              firebaseKey: key,
+              ...data[key]
+            }));
+            setProperties(loadedList);
+          } else {
+            // Si la base de datos está vacía, subimos las iniciales
+            initialProperties.forEach(p => {
+              db.ref('properties').push(p);
+            });
+          }
+          setLoadingDB(false);
+        }, (error) => {
+          console.error("Error al leer Firebase:", error);
+          setLoadingDB(false);
+        });
+
+        return () => propRef.off();
+      }, []);
+
+      // Detección automática de Hash (Deep Linking) para WhatsApp
+      useEffect(() => {
+        if (loadingDB) return;
         const parseHashAndOpen = () => {
           const hash = window.location.hash;
           if (hash.includes('#/inmueble/')) {
             const ctrl = decodeURIComponent(hash.split('#/inmueble/')[1]);
-            const match = properties.find(p => p.controlNumber === ctrl || p.id === ctrl);
-            if (match) {
+            const match = properties.find(p => p.controlNumber === ctrl);
+            if (match && (authMode === 'admin' || match.status !== 'inactive')) {
               setSelectedProperty(match);
               setActiveTab(match.type || 'venta');
               setActivePhotoIdx(0);
@@ -129,7 +171,7 @@
         parseHashAndOpen();
         window.addEventListener('hashchange', parseHashAndOpen);
         return () => window.removeEventListener('hashchange', parseHashAndOpen);
-      }, [properties]);
+      }, [properties, loadingDB, authMode]);
 
       const [formData, setFormData] = useState({
         controlNumber: '',
@@ -215,6 +257,7 @@
         });
       };
 
+      // Guardar o actualizar directamente en Firebase
       const handleSaveProperty = (e) => {
         e.preventDefault();
         if (formData.photos.length === 0) {
@@ -224,7 +267,6 @@
 
         const propData = {
           ...formData,
-          id: editingProperty ? editingProperty.id : (`ZEN-${Date.now()}`),
           controlNumber: formData.controlNumber || `ZEN-${Date.now()}`,
           price: Number(formData.price),
           landArea: Number(formData.landArea),
@@ -236,34 +278,37 @@
         };
 
         if (editingProperty) {
-          setProperties(properties.map(p => p.id === editingProperty.id ? propData : p));
-          alert('Inmueble actualizado correctamente');
+          db.ref('properties/' + editingProperty.firebaseKey).set(propData)
+            .then(() => alert('Inmueble actualizado en Firebase correctamente'))
+            .catch(err => alert('Error al actualizar: ' + err.message));
         } else {
-          setProperties([propData, ...properties]);
-          alert('Inmueble dado de alta correctamente');
+          db.ref('properties').push(propData)
+            .then(() => alert('Inmueble dado de alta en Firebase correctamente'))
+            .catch(err => alert('Error al guardar: ' + err.message));
         }
 
         closeModalForm();
       };
 
-      const togglePropertyStatus = (id) => {
-        setProperties(properties.map(p => {
-          if (p.id === id) {
-            const newStatus = p.status === 'inactive' ? 'active' : 'inactive';
-            return { ...p, status: newStatus };
-          }
-          return p;
-        }));
+      // Cambiar estatus activo/inactivo en Firebase
+      const togglePropertyStatus = (prop) => {
+        const newStatus = prop.status === 'inactive' ? 'active' : 'inactive';
+        db.ref('properties/' + prop.firebaseKey).update({ status: newStatus })
+          .catch(err => alert('Error al cambiar estatus: ' + err.message));
       };
 
+      // Eliminar propiedad de Firebase
       const deleteProperty = (prop) => {
         if (confirm(`¿Estás seguro de que deseas eliminar permanentemente la propiedad con Control #${prop.controlNumber}?`)) {
-          setProperties(properties.filter(p => p.id !== prop.id));
-          if (selectedProperty && selectedProperty.id === prop.id) {
-            setSelectedProperty(null);
-            window.location.hash = '';
-          }
-          alert('Propiedad eliminada con éxito.');
+          db.ref('properties/' + prop.firebaseKey).remove()
+            .then(() => {
+              if (selectedProperty && selectedProperty.firebaseKey === prop.firebaseKey) {
+                setSelectedProperty(null);
+                window.location.hash = '';
+              }
+              alert('Propiedad eliminada de Firebase con éxito.');
+            })
+            .catch(err => alert('Error al eliminar: ' + err.message));
         }
       };
 
@@ -328,14 +373,12 @@
             }, 'image/png');
           };
         } catch (err) {
-          alert('Foto lista para compartir. Usa la opción "Ver Fotos" desde el link compartido.');
+          alert('Foto lista para compartir.');
         }
       };
 
-      // ENVÍO DE WHATSAPP MEJORADO
       const sendWhatsApp = (prop) => {
         const isRenta = prop.type === 'renta';
-        // Construir la URL completa actual sin el hash previo
         const cleanBaseUrl = window.location.href.split('#')[0];
         const directLink = `${cleanBaseUrl}#/inmueble/${encodeURIComponent(prop.controlNumber)}`;
 
@@ -358,7 +401,7 @@
 
         message += `\n*Distribución de la Vivienda:*\n` +
           (prop.roomDetails || []).map(d => `• ${d}`).join('\n') + `\n\n` +
-          `📸 *Ver Galería Completa de Fotos:* ${directLink}`;
+          `📸 *Ver Galería Completa y Fotos:* ${directLink}`;
 
         const encoded = encodeURIComponent(message);
         window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
@@ -401,7 +444,7 @@
                 </div>
                 <div>
                   <h1 className="text-lg font-extrabold tracking-wider text-white">ZENTAI INMOBILIARIA</h1>
-                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Catálogo Inmobiliario Profesional</p>
+                  <p className="text-[10px] text-zentai-gold tracking-widest uppercase font-semibold">Sincronizado con Firebase</p>
                 </div>
               </div>
 
@@ -443,7 +486,7 @@
             <div className="bg-amber-50 border-b border-amber-200 py-2.5 shadow-inner">
               <div className="max-w-7xl mx-auto px-4 flex justify-between items-center text-xs">
                 <span className="text-amber-900 font-bold flex items-center gap-1.5">
-                  <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Modo Administrador: Puedes eliminar, ocultar/activar y editar cualquier inmueble.
+                  <i className="fa-solid fa-triangle-exclamation text-amber-600"></i> Modo Administrador Activo (Firebase)
                 </span>
                 <button
                   onClick={() => { setEditingProperty(null); setShowNewModal(true); }}
@@ -522,7 +565,12 @@
               )}
             </div>
 
-            {filtered.length === 0 ? (
+            {loadingDB ? (
+              <div className="text-center py-16 text-slate-500">
+                <i className="fa-solid fa-spinner fa-spin text-3xl text-zentai-gold mb-2"></i>
+                <p>Cargando datos desde Firebase...</p>
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="text-center py-16 bg-white rounded-xl border border-slate-200">
                 <i className="fa-solid fa-house-circle-xmark text-4xl text-slate-300 mb-2"></i>
                 <p className="text-slate-600 font-semibold text-sm">No se encontraron inmuebles registrados para esta categoría o filtros.</p>
@@ -530,7 +578,7 @@
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filtered.map(prop => (
-                  <div key={prop.id} className={`bg-white rounded-xl shadow-md border overflow-hidden flex flex-col hover:shadow-lg transition ${prop.status === 'inactive' ? 'border-red-300 bg-red-50/20 opacity-80' : 'border-slate-200'}`}>
+                  <div key={prop.firebaseKey} className={`bg-white rounded-xl shadow-md border overflow-hidden flex flex-col hover:shadow-lg transition ${prop.status === 'inactive' ? 'border-red-300 bg-red-50/20 opacity-80' : 'border-slate-200'}`}>
                     
                     <div className="relative h-48 bg-slate-100 overflow-hidden group">
                       <img
@@ -599,7 +647,7 @@
                               
                               <div className="flex gap-1.5">
                                 <button
-                                  onClick={() => togglePropertyStatus(prop.id)}
+                                  onClick={() => togglePropertyStatus(prop)}
                                   className={`text-[10px] font-bold px-2 py-0.5 rounded transition ${prop.status === 'inactive' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-slate-700 hover:bg-slate-800 text-white'}`}
                                 >
                                   <i className={`fa-solid ${prop.status === 'inactive' ? 'fa-eye' : 'fa-eye-slash'} mr-1`}></i>
@@ -837,7 +885,7 @@
               <div className="bg-white w-full max-w-2xl rounded-2xl overflow-hidden shadow-2xl my-8">
                 <div className="bg-zentai-blue text-white p-4 flex justify-between items-center">
                   <h2 className="font-bold text-base flex items-center gap-2">
-                    <i className="fa-solid fa-house-medical text-zentai-gold"></i> {editingProperty ? 'Editar Inmueble' : 'Alta de Nuevo Inmueble'}
+                    <i className="fa-solid fa-house-medical text-zentai-gold"></i> {editingProperty ? 'Editar Inmueble' : 'Alta de Nuevo Inmueble'} (Firebase)
                   </h2>
                   <button onClick={closeModalForm} className="text-slate-300 hover:text-white">
                     <i className="fa-solid fa-xmark text-lg"></i>
@@ -1105,7 +1153,7 @@
                       type="submit"
                       className="px-4 py-2 bg-zentai-gold hover:bg-zentai-gold-light text-white font-bold rounded shadow"
                     >
-                      {editingProperty ? 'Guardar Cambios' : 'Registrar Inmueble'}
+                      {editingProperty ? 'Guardar Cambios' : 'Registrar en Firebase'}
                     </button>
                   </div>
                 </form>
@@ -1117,7 +1165,7 @@
             <div className="max-w-7xl mx-auto px-4 text-center space-y-2">
               <p className="font-semibold text-slate-300">ZENTAI SERVICIOS INMOBILIARIOS</p>
               <p className="text-[11px] text-slate-500">
-                Sistema Inmobiliario Profesional
+                Sistema Inmobiliario Sincronizado en Tiempo Real
               </p>
             </div>
           </footer>
